@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+option go_package = "emqx_auth";
+
+package emqx_auth;
+
+service Authentication  {
+    rpc AuthUser(AuthRequest) returns(AuthResponse);
+    rpc IsSuper(AuthRequest) returns (AuthResponse);
+    rpc AuthACL(ACLRequest) returns (ACLResponse);
+}
+
+message AuthRequest  {
+    string username = 1;
+    string client_id = 2;
+    string ip_address = 3;
+    string protocol = 4;
+    int32 port = 5;
+    string tls_common_name = 6;
+    string tls_subject = 7;
+}
+
+message AuthResponse {
+    int32 code = 1;
+    string msg = 2;
+}
+
+message ACLRequest {
+    string username = 1;
+    string client_id = 2;
+    string ip_address = 3;
+    string protocol = 4;
+    string mount_point = 5;
+    string topic = 6;
+}
+
+message ACLResponse {
+    int32 code = 1;
+    string msg = 2;
+}
