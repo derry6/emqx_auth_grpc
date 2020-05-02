@@ -4,37 +4,34 @@ option go_package = "emqx_auth";
 
 package emqx_auth;
 
-service Authentication  {
+service Authentication {
     rpc AuthUser(AuthRequest) returns(AuthResponse);
-    rpc IsSuper(AuthRequest) returns (AuthResponse);
-    rpc AuthACL(ACLRequest) returns (ACLResponse);
+    rpc AuthACL(AuthRequest) returns (AuthResponse);
 }
 
 message AuthRequest  {
-    string username = 1;
-    string client_id = 2;
-    string ip_address = 3;
+    string client_id = 1;
+    string username = 2;
+    string password = 3;
     string protocol = 4;
-    int32 port = 5;
-    string tls_common_name = 6;
-    string tls_subject = 7;
+    string peerhost = 5;
+    int32 sockport =  6;
+    string peercert = 7;
+    bool is_bridge = 8;
+    bool is_superuser = 9;
+    string mountpoint = 10;
+    string zone = 11;
+    string tls_common_name = 12;
+    string tls_subject = 13;
+    // acl
+    string topic = 14;
+    string access = 15;
 }
 
 message AuthResponse {
     int32 code = 1;
     string msg = 2;
-}
-
-message ACLRequest {
-    string username = 1;
-    string client_id = 2;
-    string ip_address = 3;
-    string protocol = 4;
-    string mount_point = 5;
-    string topic = 6;
-}
-
-message ACLResponse {
-    int32 code = 1;
-    string msg = 2;
+    bool is_superuser = 3;
+    bool anonymous = 4;
+    string mountpoint = 6;
 }

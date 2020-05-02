@@ -21,19 +21,14 @@
 -include_lib("emqx/include/emqx.hrl").
 -include_lib("emqx/include/logger.hrl").
 
--logger_header("[ACL grpc]").
-
--import(emqx_auth_grpc_cli,
-        [ request/6
-        , feedvar/2
-        ]).
+-logger_header("[ACL-GRPC]").
 
 %% ACL callbacks
--export([ register_metrics/0
-        , check_acl/5
-        , reload_acl/1
-        , description/0
-        ]).
+-export([register_metrics/0
+    , check/5
+    , reload_acl/1
+    , description/0
+]).
 
 -spec(register_metrics() -> ok).
 register_metrics() ->
@@ -43,25 +38,22 @@ register_metrics() ->
 %% ACL callbacks
 %%--------------------------------------------------------------------
 
-check_acl(ClientInfo, PubSub, Topic, AclResult, State) ->
+check(ClientInfo, PubSub, Topic, AclResult, State) ->
+%%    ?LOG(info, "Checking ACL, Client=~p, PubSub=~p, Topic=~p, AuthResult=~p, State=~p", [ClientInfo, PubSub, Topic, AclResult, State]),
     return_with(fun inc_metrics/1,
-                do_check_acl(ClientInfo, PubSub, Topic, AclResult, State)).
+        do_check_acl(ClientInfo, PubSub, Topic, AclResult, State)).
 
 do_check_acl(#{username := <<$$, _/binary>>}, _PubSub, _Topic, _AclResult, _Config) ->
     ok;
-do_check_acl(ClientInfo, PubSub, Topic, _AclResult, #{acl_req    := AclReq,
-                                                      http_opts  := HttpOpts,
-                                                      retry_opts := RetryOpts,
-                                                      headers    := Headers}) ->
+do_check_acl(ClientInfo, PubSub, Topic, _AclResult, #{req_opts := ReqOpts, headers := Headers}) ->
     ClientInfo1 = ClientInfo#{access => access(PubSub), topic => Topic},
-    case check_acl_request(AclReq, ClientInfo1, Headers, HttpOpts, RetryOpts) of
-        {ok, 200, "ignore"} -> ok;
-        {ok, 200, _Body}    -> {stop, allow};
-        {ok, _Code, _Body}  -> {stop, deny};
-        {error, Error}      ->
-            ?LOG(error, "Request ACL url ~s, error: ~p",
-                 [AclReq#http_request.url, Error]),
-            ok
+    case emqx_auth_grpc_cli:auth_acl(ClientInfo1, Headers, ReqOpts) of
+        {ok, Rsp, _Meta} ->
+            case maps:get(code, Rsp, 0) of
+                0 -> {stop, allow};
+                Code -> ?LOG(error, "Failed to check acl, Code=~p", [Code]), {stop, deny}
+            end;
+        Error -> ?LOG(error, "Failed to call grpc: ~p", [Error]), {stop, deny}
     end.
 
 reload_acl(_State) -> ok.
@@ -82,12 +74,6 @@ inc_metrics({stop, deny}) ->
 return_with(Fun, Result) ->
     Fun(Result), Result.
 
-check_acl_request(#http_request{method = Method,
-                                url    = Url,
-                                params = Params},
-                  ClientInfo, Headers, HttpOpts, RetryOpts) ->
-    request(Method, Url, feedvar(Params, ClientInfo), Headers, HttpOpts, RetryOpts).
-
 access(subscribe) -> 1;
-access(publish)   -> 2.
+access(publish) -> 2.
 

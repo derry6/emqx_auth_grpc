@@ -19,100 +19,104 @@
 -include("emqx_auth_grpc.hrl").
 
 -include_lib("emqx/include/emqx.hrl").
--include_lib("emqx/include/logger.hrl").
 -include_lib("emqx/include/types.hrl").
+-include_lib("emqx/include/logger.hrl").
+-include_lib("grpcbox/include/grpcbox.hrl").
 
--logger_header("[Auth GRPC]").
-
--import(emqx_auth_grpc_cli,
-        [ request/6
-        , feedvar/2
-        ]).
+-logger_header("[Auth-GRPC]").
 
 %% Callbacks
--export([ register_metrics/0
-        , check/3
-        , description/0
-        ]).
+-export([register_metrics/0
+    , check/3
+    , description/0
+    , test_log/0
+]).
+
+description() -> "Authentication by GRPC API".
 
 -spec(register_metrics() -> ok).
 register_metrics() ->
     lists:foreach(fun emqx_metrics:new/1, ?AUTH_METRICS).
 
-check(ClientInfo, AuthResult, #{auth_req   := AuthReq,
-                                super_req  := SuperReq,
-                                http_opts  := HttpOpts,
-                                retry_opts := RetryOpts,
-                                headers    := Headers}) ->
-    case authenticate(AuthReq, ClientInfo, Headers, HttpOpts, RetryOpts) of
 
-        {ok, 200, "ignore"} ->
-            emqx_metrics:inc(?AUTH_METRICS(ignore)), ok;
 
-        {ok, 200, Body}  ->
-            emqx_metrics:inc(?AUTH_METRICS(success)),
-            IsSuperuser = is_superuser(SuperReq, ClientInfo, Headers, HttpOpts, RetryOpts),
-            {stop, AuthResult#{is_superuser => IsSuperuser,
-                                auth_result => success,
-                                anonymous   => false,
-                                mountpoint  => mountpoint(Body, ClientInfo)}};
+handle_rpc_error(AuthResult, _Error, _Client) ->
+    emqx_metrics:inc(?AUTH_METRICS(failure)),
+    {stop, AuthResult#{auth_result => server_unavailable, anonymous => false}}.
 
-        {ok, Code, _Body} ->
-            ?LOG(error, "Deny connection from url: ~s, response http code: ~p", [AuthReq#http_request.url, Code]),
+
+handle_rpc_ok(AuthResult, Rsp, Client) ->
+    case maps:get(code, Rsp, 0) of
+        0 ->
+            case maps:get(ignore, Rsp, false) of
+                true -> emqx_metrics:inc(?AUTH_METRICS(success)), ok;
+                false ->
+                    emqx_metrics:inc(?AUTH_METRICS(success)),
+                    {stop,
+                        AuthResult#{
+                            is_superuser => maps:get(superuser, Rsp, false),
+                            auth_result => success,
+                            anonymous => false,
+                            mountpoint => mountpoint(Rsp,Client)
+                        }
+                    }
+            end;
+        Code ->
+            ?LOG(error,  "Deny connection grpc code: ~p", [Code]),
             emqx_metrics:inc(?AUTH_METRICS(failure)),
-            {stop, AuthResult#{auth_result => http_to_connack_error(Code),
-                anonymous   => false}};
-
-        {error, Error} ->
-            ?LOG(error, "Request auth url: ~s, error: ~p", [AuthReq#http_request.url, Error]),
-            emqx_metrics:inc(?AUTH_METRICS(failure)),
-            %%FIXME later: server_unavailable is not right.
-            {stop, AuthResult#{auth_result => server_unavailable,
-                               anonymous   => false}}
+            {stop, AuthResult#{auth_result => auth_errcode(Code), anonymous => false}}
     end.
 
 
-description() -> "Authentication by HTTP API".
-
-%%--------------------------------------------------------------------
-%% Requests
-%%--------------------------------------------------------------------
-
-authenticate(#http_request{method = Method,
-                           url    = Url,
-                           params = Params},
-             ClientInfo, HttpHeaders, HttpOpts, RetryOpts) ->
-   request(Method, Url, feedvar(Params, ClientInfo), HttpHeaders, HttpOpts, RetryOpts).
-
-
--spec(is_superuser(maybe(#http_request{}), emqx_types:client(), list(), list(), list()) -> boolean()).
-is_superuser(undefined, _ClientInfo, _HttpHeaders, _HttpOpts, _RetryOpts) ->
-    false;
-is_superuser(#http_request{method = Method,
-                           url    = Url,
-                           params = Params},
-             ClientInfo, HttpHeaders, HttpOpts, RetryOpts) ->
-    case request(Method, Url, feedvar(Params, ClientInfo), HttpHeaders, HttpOpts, RetryOpts) of
-        {ok, 200, _Body}   -> true;
-        {ok, _Code, _Body} -> false;
-        {error, Error}     -> ?LOG(error, "Request superuser url ~s, error: ~p", [Url, Error]),
-                              false
+check(ClientInfo, AuthResult, _Opts = #{req_opts := ReqOpts, headers := Headers}) ->
+%%    ?LOG(info, "Auth user: Client=~p, AuthResult=~p, Opts=~p",[ClientInfo, AuthResult, Opts]),
+    case emqx_auth_grpc_cli:auth_user(ClientInfo, Headers, ReqOpts) of
+        {ok, Rsp, _Meta} ->
+            handle_rpc_ok(AuthResult, Rsp, ClientInfo);
+        Error ->
+            ?LOG(error, "Failed to auth user: ~p", [Error]),
+            handle_rpc_error(AuthResult, Error, ClientInfo)
     end.
 
-
-
-mountpoint(Body, #{mountpoint := Mountpoint}) ->
-    case emqx_json:safe_decode(iolist_to_binary(Body), [return_maps]) of
-        {error, _} -> Mountpoint;
-        {ok, Json} when is_map(Json) ->
-            maps:get(<<"mountpoint">>, Json, Mountpoint);
-        {ok, _NotMap} -> Mountpoint
+mountpoint(Rsp, #{mountpoint := Mountpoint}) ->
+    case maps:get(mount_point, Rsp, undefined) of
+        undefined -> Mountpoint;
+        <<>> -> Mountpoint;
+        Other -> Other
     end.
 
-http_to_connack_error(400) -> bad_username_or_password;
-http_to_connack_error(401) -> bad_username_or_password;
-http_to_connack_error(403) -> not_authorized;
-http_to_connack_error(429) -> banned;
-http_to_connack_error(503) -> server_unavailable;
-http_to_connack_error(504) -> server_busy;
-http_to_connack_error(_) -> server_unavailable.
+auth_errcode(?GRPC_STATUS_UNKNOWN) -> bad_username_or_password;
+auth_errcode(?GRPC_STATUS_NOT_FOUND) -> bad_username_or_password;
+auth_errcode(?GRPC_STATUS_PERMISSION_DENIED) -> not_authorized;
+auth_errcode(?GRPC_STATUS_UNAUTHENTICATED) -> not_authorized;
+auth_errcode(?GRPC_STATUS_DEADLINE_EXCEEDED) -> banned;
+auth_errcode(?GRPC_STATUS_UNAVAILABLE) -> server_unavailable;
+auth_errcode(?GRPC_STATUS_RESOURCE_EXHAUSTED) -> server_busy;
+auth_errcode(?GRPC_STATUS_DATA_LOSS) -> not_exists;
+auth_errcode(_) -> server_unavailable.
+
+test_log() ->
+    ?LOG(info, "testing logger").
+
+%%-define(CHANNELS_TAB, channels_table).
+%%
+%%-define(GRPC_STATUS_OK, <<"0">>).
+%%-define(GRPC_STATUS_CANCELLED, <<"1">>).
+%%-define(GRPC_STATUS_UNKNOWN, <<"2">>).
+%%-define(GRPC_STATUS_INVALID_ARGUMENT, <<"3">>).
+%%-define(GRPC_STATUS_DEADLINE_EXCEEDED, <<"4">>).
+%%-define(GRPC_STATUS_NOT_FOUND, <<"5">>).
+%%-define(GRPC_STATUS_ALREADY_EXISTS , <<"6">>).
+%%-define(GRPC_STATUS_PERMISSION_DENIED, <<"7">>).
+%%-define(GRPC_STATUS_RESOURCE_EXHAUSTED, <<"8">>).
+%%-define(GRPC_STATUS_FAILED_PRECONDITION, <<"9">>).
+%%-define(GRPC_STATUS_ABORTED, <<"10">>).
+%%-define(GRPC_STATUS_OUT_OF_RANGE, <<"11">>).
+%%-define(GRPC_STATUS_UNIMPLEMENTED, <<"12">>).
+%%-define(GRPC_STATUS_INTERNAL, <<"13">>).
+%%-define(GRPC_STATUS_UNAVAILABLE, <<"14">>).
+%%-define(GRPC_STATUS_DATA_LOSS, <<"15">>).
+%%-define(GRPC_STATUS_UNAUTHENTICATED, <<"16">>).
+
+%%-define(GRPC_ERROR(Status, Message), {grpc_error, {Status, Message}}).
+%%-define(THROW(Status, Message), throw(?GRPC_ERROR(Status, Message))).

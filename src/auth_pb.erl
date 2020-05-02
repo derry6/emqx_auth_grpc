@@ -51,41 +51,38 @@
 
 %% message types
 -type auth_request() ::
-      #{username                => iodata(),        % = 1
-        client_id               => iodata(),        % = 2
-        ip_address              => iodata(),        % = 3
+      #{client_id               => iodata(),        % = 1
+        username                => iodata(),        % = 2
+        password                => iodata(),        % = 3
         protocol                => iodata(),        % = 4
-        port                    => integer(),       % = 5, 32 bits
-        tls_common_name         => iodata(),        % = 6
-        tls_subject             => iodata()         % = 7
+        peerhost                => iodata(),        % = 5
+        sockport                => integer(),       % = 6, 32 bits
+        peercert                => iodata(),        % = 7
+        is_bridge               => boolean() | 0 | 1, % = 8
+        is_superuser            => boolean() | 0 | 1, % = 9
+        mountpoint              => iodata(),        % = 10
+        zone                    => iodata(),        % = 11
+        tls_common_name         => iodata(),        % = 12
+        tls_subject             => iodata(),        % = 13
+        topic                   => iodata(),        % = 14
+        access                  => iodata()         % = 15
        }.
 
 -type auth_response() ::
       #{code                    => integer(),       % = 1, 32 bits
-        msg                     => iodata()         % = 2
+        msg                     => iodata(),        % = 2
+        is_superuser            => boolean() | 0 | 1, % = 3
+        anonymous               => boolean() | 0 | 1, % = 4
+        mountpoint              => iodata()         % = 6
        }.
 
--type acl_request() ::
-      #{username                => iodata(),        % = 1
-        client_id               => iodata(),        % = 2
-        ip_address              => iodata(),        % = 3
-        protocol                => iodata(),        % = 4
-        mount_point             => iodata(),        % = 5
-        topic                   => iodata()         % = 6
-       }.
+-export_type(['auth_request'/0, 'auth_response'/0]).
 
--type acl_response() ::
-      #{code                    => integer(),       % = 1, 32 bits
-        msg                     => iodata()         % = 2
-       }.
-
--export_type(['auth_request'/0, 'auth_response'/0, 'acl_request'/0, 'acl_response'/0]).
-
--spec encode_msg(auth_request() | auth_response() | acl_request() | acl_response(), atom()) -> binary().
+-spec encode_msg(auth_request() | auth_response(), atom()) -> binary().
 encode_msg(Msg, MsgName) when is_atom(MsgName) ->
     encode_msg(Msg, MsgName, []).
 
--spec encode_msg(auth_request() | auth_response() | acl_request() | acl_response(), atom(), list()) -> binary().
+-spec encode_msg(auth_request() | auth_response(), atom(), list()) -> binary().
 encode_msg(Msg, MsgName, Opts) ->
     case proplists:get_bool(verify, Opts) of
       true -> verify_msg(Msg, MsgName, Opts);
@@ -98,11 +95,7 @@ encode_msg(Msg, MsgName, Opts) ->
 				  TrUserData);
       auth_response ->
 	  encode_msg_auth_response(id(Msg, TrUserData),
-				   TrUserData);
-      acl_request ->
-	  encode_msg_acl_request(id(Msg, TrUserData), TrUserData);
-      acl_response ->
-	  encode_msg_acl_response(id(Msg, TrUserData), TrUserData)
+				   TrUserData)
     end.
 
 
@@ -112,7 +105,7 @@ encode_msg_auth_request(Msg, TrUserData) ->
 
 encode_msg_auth_request(#{} = M, Bin, TrUserData) ->
     B1 = case M of
-	   #{username := F1} ->
+	   #{client_id := F1} ->
 	       begin
 		 TrF1 = id(F1, TrUserData),
 		 case is_empty_string(TrF1) of
@@ -124,7 +117,7 @@ encode_msg_auth_request(#{} = M, Bin, TrUserData) ->
 	   _ -> Bin
 	 end,
     B2 = case M of
-	   #{client_id := F2} ->
+	   #{username := F2} ->
 	       begin
 		 TrF2 = id(F2, TrUserData),
 		 case is_empty_string(TrF2) of
@@ -136,7 +129,7 @@ encode_msg_auth_request(#{} = M, Bin, TrUserData) ->
 	   _ -> B1
 	 end,
     B3 = case M of
-	   #{ip_address := F3} ->
+	   #{password := F3} ->
 	       begin
 		 TrF3 = id(F3, TrUserData),
 		 case is_empty_string(TrF3) of
@@ -160,39 +153,131 @@ encode_msg_auth_request(#{} = M, Bin, TrUserData) ->
 	   _ -> B3
 	 end,
     B5 = case M of
-	   #{port := F5} ->
+	   #{peerhost := F5} ->
 	       begin
 		 TrF5 = id(F5, TrUserData),
-		 if TrF5 =:= 0 -> B4;
-		    true ->
-			e_type_int32(TrF5, <<B4/binary, 40>>, TrUserData)
+		 case is_empty_string(TrF5) of
+		   true -> B4;
+		   false ->
+		       e_type_string(TrF5, <<B4/binary, 42>>, TrUserData)
 		 end
 	       end;
 	   _ -> B4
 	 end,
     B6 = case M of
-	   #{tls_common_name := F6} ->
+	   #{sockport := F6} ->
 	       begin
 		 TrF6 = id(F6, TrUserData),
-		 case is_empty_string(TrF6) of
-		   true -> B5;
-		   false ->
-		       e_type_string(TrF6, <<B5/binary, 50>>, TrUserData)
+		 if TrF6 =:= 0 -> B5;
+		    true ->
+			e_type_int32(TrF6, <<B5/binary, 48>>, TrUserData)
 		 end
 	       end;
 	   _ -> B5
 	 end,
+    B7 = case M of
+	   #{peercert := F7} ->
+	       begin
+		 TrF7 = id(F7, TrUserData),
+		 case is_empty_string(TrF7) of
+		   true -> B6;
+		   false ->
+		       e_type_string(TrF7, <<B6/binary, 58>>, TrUserData)
+		 end
+	       end;
+	   _ -> B6
+	 end,
+    B8 = case M of
+	   #{is_bridge := F8} ->
+	       begin
+		 TrF8 = id(F8, TrUserData),
+		 if TrF8 =:= false -> B7;
+		    true -> e_type_bool(TrF8, <<B7/binary, 64>>, TrUserData)
+		 end
+	       end;
+	   _ -> B7
+	 end,
+    B9 = case M of
+	   #{is_superuser := F9} ->
+	       begin
+		 TrF9 = id(F9, TrUserData),
+		 if TrF9 =:= false -> B8;
+		    true -> e_type_bool(TrF9, <<B8/binary, 72>>, TrUserData)
+		 end
+	       end;
+	   _ -> B8
+	 end,
+    B10 = case M of
+	    #{mountpoint := F10} ->
+		begin
+		  TrF10 = id(F10, TrUserData),
+		  case is_empty_string(TrF10) of
+		    true -> B9;
+		    false ->
+			e_type_string(TrF10, <<B9/binary, 82>>, TrUserData)
+		  end
+		end;
+	    _ -> B9
+	  end,
+    B11 = case M of
+	    #{zone := F11} ->
+		begin
+		  TrF11 = id(F11, TrUserData),
+		  case is_empty_string(TrF11) of
+		    true -> B10;
+		    false ->
+			e_type_string(TrF11, <<B10/binary, 90>>, TrUserData)
+		  end
+		end;
+	    _ -> B10
+	  end,
+    B12 = case M of
+	    #{tls_common_name := F12} ->
+		begin
+		  TrF12 = id(F12, TrUserData),
+		  case is_empty_string(TrF12) of
+		    true -> B11;
+		    false ->
+			e_type_string(TrF12, <<B11/binary, 98>>, TrUserData)
+		  end
+		end;
+	    _ -> B11
+	  end,
+    B13 = case M of
+	    #{tls_subject := F13} ->
+		begin
+		  TrF13 = id(F13, TrUserData),
+		  case is_empty_string(TrF13) of
+		    true -> B12;
+		    false ->
+			e_type_string(TrF13, <<B12/binary, 106>>, TrUserData)
+		  end
+		end;
+	    _ -> B12
+	  end,
+    B14 = case M of
+	    #{topic := F14} ->
+		begin
+		  TrF14 = id(F14, TrUserData),
+		  case is_empty_string(TrF14) of
+		    true -> B13;
+		    false ->
+			e_type_string(TrF14, <<B13/binary, 114>>, TrUserData)
+		  end
+		end;
+	    _ -> B13
+	  end,
     case M of
-      #{tls_subject := F7} ->
+      #{access := F15} ->
 	  begin
-	    TrF7 = id(F7, TrUserData),
-	    case is_empty_string(TrF7) of
-	      true -> B6;
+	    TrF15 = id(F15, TrUserData),
+	    case is_empty_string(TrF15) of
+	      true -> B14;
 	      false ->
-		  e_type_string(TrF7, <<B6/binary, 58>>, TrUserData)
+		  e_type_string(TrF15, <<B14/binary, 122>>, TrUserData)
 	    end
 	  end;
-      _ -> B6
+      _ -> B14
     end.
 
 encode_msg_auth_response(Msg, TrUserData) ->
@@ -211,38 +296,8 @@ encode_msg_auth_response(#{} = M, Bin, TrUserData) ->
 	       end;
 	   _ -> Bin
 	 end,
-    case M of
-      #{msg := F2} ->
-	  begin
-	    TrF2 = id(F2, TrUserData),
-	    case is_empty_string(TrF2) of
-	      true -> B1;
-	      false ->
-		  e_type_string(TrF2, <<B1/binary, 18>>, TrUserData)
-	    end
-	  end;
-      _ -> B1
-    end.
-
-encode_msg_acl_request(Msg, TrUserData) ->
-    encode_msg_acl_request(Msg, <<>>, TrUserData).
-
-
-encode_msg_acl_request(#{} = M, Bin, TrUserData) ->
-    B1 = case M of
-	   #{username := F1} ->
-	       begin
-		 TrF1 = id(F1, TrUserData),
-		 case is_empty_string(TrF1) of
-		   true -> Bin;
-		   false ->
-		       e_type_string(TrF1, <<Bin/binary, 10>>, TrUserData)
-		 end
-	       end;
-	   _ -> Bin
-	 end,
     B2 = case M of
-	   #{client_id := F2} ->
+	   #{msg := F2} ->
 	       begin
 		 TrF2 = id(F2, TrUserData),
 		 case is_empty_string(TrF2) of
@@ -254,81 +309,36 @@ encode_msg_acl_request(#{} = M, Bin, TrUserData) ->
 	   _ -> B1
 	 end,
     B3 = case M of
-	   #{ip_address := F3} ->
+	   #{is_superuser := F3} ->
 	       begin
 		 TrF3 = id(F3, TrUserData),
-		 case is_empty_string(TrF3) of
-		   true -> B2;
-		   false ->
-		       e_type_string(TrF3, <<B2/binary, 26>>, TrUserData)
+		 if TrF3 =:= false -> B2;
+		    true -> e_type_bool(TrF3, <<B2/binary, 24>>, TrUserData)
 		 end
 	       end;
 	   _ -> B2
 	 end,
     B4 = case M of
-	   #{protocol := F4} ->
+	   #{anonymous := F4} ->
 	       begin
 		 TrF4 = id(F4, TrUserData),
-		 case is_empty_string(TrF4) of
-		   true -> B3;
-		   false ->
-		       e_type_string(TrF4, <<B3/binary, 34>>, TrUserData)
+		 if TrF4 =:= false -> B3;
+		    true -> e_type_bool(TrF4, <<B3/binary, 32>>, TrUserData)
 		 end
 	       end;
 	   _ -> B3
 	 end,
-    B5 = case M of
-	   #{mount_point := F5} ->
-	       begin
-		 TrF5 = id(F5, TrUserData),
-		 case is_empty_string(TrF5) of
-		   true -> B4;
-		   false ->
-		       e_type_string(TrF5, <<B4/binary, 42>>, TrUserData)
-		 end
-	       end;
-	   _ -> B4
-	 end,
     case M of
-      #{topic := F6} ->
+      #{mountpoint := F5} ->
 	  begin
-	    TrF6 = id(F6, TrUserData),
-	    case is_empty_string(TrF6) of
-	      true -> B5;
+	    TrF5 = id(F5, TrUserData),
+	    case is_empty_string(TrF5) of
+	      true -> B4;
 	      false ->
-		  e_type_string(TrF6, <<B5/binary, 50>>, TrUserData)
+		  e_type_string(TrF5, <<B4/binary, 50>>, TrUserData)
 	    end
 	  end;
-      _ -> B5
-    end.
-
-encode_msg_acl_response(Msg, TrUserData) ->
-    encode_msg_acl_response(Msg, <<>>, TrUserData).
-
-
-encode_msg_acl_response(#{} = M, Bin, TrUserData) ->
-    B1 = case M of
-	   #{code := F1} ->
-	       begin
-		 TrF1 = id(F1, TrUserData),
-		 if TrF1 =:= 0 -> Bin;
-		    true ->
-			e_type_int32(TrF1, <<Bin/binary, 8>>, TrUserData)
-		 end
-	       end;
-	   _ -> Bin
-	 end,
-    case M of
-      #{msg := F2} ->
-	  begin
-	    TrF2 = id(F2, TrUserData),
-	    case is_empty_string(TrF2) of
-	      true -> B1;
-	      false ->
-		  e_type_string(TrF2, <<B1/binary, 18>>, TrUserData)
-	    end
-	  end;
-      _ -> B1
+      _ -> B4
     end.
 
 -compile({nowarn_unused_function,e_type_sint/3}).
@@ -469,11 +479,6 @@ decode_msg_2_doit(auth_request, Bin, TrUserData) ->
        TrUserData);
 decode_msg_2_doit(auth_response, Bin, TrUserData) ->
     id(decode_msg_auth_response(Bin, TrUserData),
-       TrUserData);
-decode_msg_2_doit(acl_request, Bin, TrUserData) ->
-    id(decode_msg_acl_request(Bin, TrUserData), TrUserData);
-decode_msg_2_doit(acl_response, Bin, TrUserData) ->
-    id(decode_msg_acl_response(Bin, TrUserData),
        TrUserData).
 
 
@@ -482,158 +487,317 @@ decode_msg_auth_request(Bin, TrUserData) ->
     dfp_read_field_def_auth_request(Bin, 0, 0,
 				    id(<<>>, TrUserData), id(<<>>, TrUserData),
 				    id(<<>>, TrUserData), id(<<>>, TrUserData),
-				    id(0, TrUserData), id(<<>>, TrUserData),
+				    id(<<>>, TrUserData), id(0, TrUserData),
+				    id(<<>>, TrUserData), id(false, TrUserData),
+				    id(false, TrUserData), id(<<>>, TrUserData),
+				    id(<<>>, TrUserData), id(<<>>, TrUserData),
+				    id(<<>>, TrUserData), id(<<>>, TrUserData),
 				    id(<<>>, TrUserData), TrUserData).
 
 dfp_read_field_def_auth_request(<<10, Rest/binary>>, Z1,
 				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
-    d_field_auth_request_username(Rest, Z1, Z2, F@_1, F@_2,
-				  F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData);
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_client_id(Rest, Z1, Z2, F@_1, F@_2,
+				   F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				   F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				   TrUserData);
 dfp_read_field_def_auth_request(<<18, Rest/binary>>, Z1,
 				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
-    d_field_auth_request_client_id(Rest, Z1, Z2, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData);
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_username(Rest, Z1, Z2, F@_1, F@_2,
+				  F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				  F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				  TrUserData);
 dfp_read_field_def_auth_request(<<26, Rest/binary>>, Z1,
 				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
-    d_field_auth_request_ip_address(Rest, Z1, Z2, F@_1,
-				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				    TrUserData);
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_password(Rest, Z1, Z2, F@_1, F@_2,
+				  F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				  F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				  TrUserData);
 dfp_read_field_def_auth_request(<<34, Rest/binary>>, Z1,
 				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
     d_field_auth_request_protocol(Rest, Z1, Z2, F@_1, F@_2,
-				  F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData);
-dfp_read_field_def_auth_request(<<40, Rest/binary>>, Z1,
+				  F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				  F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				  TrUserData);
+dfp_read_field_def_auth_request(<<42, Rest/binary>>, Z1,
 				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
-    d_field_auth_request_port(Rest, Z1, Z2, F@_1, F@_2,
-			      F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData);
-dfp_read_field_def_auth_request(<<50, Rest/binary>>, Z1,
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_peerhost(Rest, Z1, Z2, F@_1, F@_2,
+				  F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				  F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				  TrUserData);
+dfp_read_field_def_auth_request(<<48, Rest/binary>>, Z1,
 				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
-    d_field_auth_request_tls_common_name(Rest, Z1, Z2, F@_1,
-					 F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-					 TrUserData);
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_sockport(Rest, Z1, Z2, F@_1, F@_2,
+				  F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				  F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				  TrUserData);
 dfp_read_field_def_auth_request(<<58, Rest/binary>>, Z1,
 				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_peercert(Rest, Z1, Z2, F@_1, F@_2,
+				  F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				  F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				  TrUserData);
+dfp_read_field_def_auth_request(<<64, Rest/binary>>, Z1,
+				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_is_bridge(Rest, Z1, Z2, F@_1, F@_2,
+				   F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				   F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				   TrUserData);
+dfp_read_field_def_auth_request(<<72, Rest/binary>>, Z1,
+				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_is_superuser(Rest, Z1, Z2, F@_1,
+				      F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				      F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				      F@_15, TrUserData);
+dfp_read_field_def_auth_request(<<82, Rest/binary>>, Z1,
+				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_mountpoint(Rest, Z1, Z2, F@_1,
+				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData);
+dfp_read_field_def_auth_request(<<90, Rest/binary>>, Z1,
+				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_zone(Rest, Z1, Z2, F@_1, F@_2,
+			      F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+			      F@_11, F@_12, F@_13, F@_14, F@_15, TrUserData);
+dfp_read_field_def_auth_request(<<98, Rest/binary>>, Z1,
+				Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+				F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    d_field_auth_request_tls_common_name(Rest, Z1, Z2, F@_1,
+					 F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+					 F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+					 F@_14, F@_15, TrUserData);
+dfp_read_field_def_auth_request(<<106, Rest/binary>>,
+				Z1, Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				F@_14, F@_15, TrUserData) ->
     d_field_auth_request_tls_subject(Rest, Z1, Z2, F@_1,
-				     F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				     TrUserData);
+				     F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				     F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				     F@_15, TrUserData);
+dfp_read_field_def_auth_request(<<114, Rest/binary>>,
+				Z1, Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				F@_14, F@_15, TrUserData) ->
+    d_field_auth_request_topic(Rest, Z1, Z2, F@_1, F@_2,
+			       F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+			       F@_11, F@_12, F@_13, F@_14, F@_15, TrUserData);
+dfp_read_field_def_auth_request(<<122, Rest/binary>>,
+				Z1, Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				F@_14, F@_15, TrUserData) ->
+    d_field_auth_request_access(Rest, Z1, Z2, F@_1, F@_2,
+				F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+				F@_11, F@_12, F@_13, F@_14, F@_15, TrUserData);
 dfp_read_field_def_auth_request(<<>>, 0, 0, F@_1, F@_2,
-				F@_3, F@_4, F@_5, F@_6, F@_7, _) ->
-    #{username => F@_1, client_id => F@_2,
-      ip_address => F@_3, protocol => F@_4, port => F@_5,
-      tls_common_name => F@_6, tls_subject => F@_7};
+				F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+				F@_11, F@_12, F@_13, F@_14, F@_15, _) ->
+    #{client_id => F@_1, username => F@_2, password => F@_3,
+      protocol => F@_4, peerhost => F@_5, sockport => F@_6,
+      peercert => F@_7, is_bridge => F@_8,
+      is_superuser => F@_9, mountpoint => F@_10,
+      zone => F@_11, tls_common_name => F@_12,
+      tls_subject => F@_13, topic => F@_14, access => F@_15};
 dfp_read_field_def_auth_request(Other, Z1, Z2, F@_1,
-				F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+				F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
 				TrUserData) ->
     dg_read_field_def_auth_request(Other, Z1, Z2, F@_1,
-				   F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				   TrUserData).
+				   F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				   F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				   F@_15, TrUserData).
 
 dg_read_field_def_auth_request(<<1:1, X:7,
 				 Rest/binary>>,
 			       N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			       TrUserData)
+			       F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			       F@_15, TrUserData)
     when N < 32 - 7 ->
     dg_read_field_def_auth_request(Rest, N + 7,
 				   X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				   F@_6, F@_7, TrUserData);
+				   F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				   F@_13, F@_14, F@_15, TrUserData);
 dg_read_field_def_auth_request(<<0:1, X:7,
 				 Rest/binary>>,
 			       N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			       TrUserData) ->
+			       F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			       F@_15, TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
       10 ->
-	  d_field_auth_request_username(Rest, 0, 0, F@_1, F@_2,
-					F@_3, F@_4, F@_5, F@_6, F@_7,
-					TrUserData);
-      18 ->
 	  d_field_auth_request_client_id(Rest, 0, 0, F@_1, F@_2,
-					 F@_3, F@_4, F@_5, F@_6, F@_7,
-					 TrUserData);
+					 F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					 F@_9, F@_10, F@_11, F@_12, F@_13,
+					 F@_14, F@_15, TrUserData);
+      18 ->
+	  d_field_auth_request_username(Rest, 0, 0, F@_1, F@_2,
+					F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+					F@_15, TrUserData);
       26 ->
-	  d_field_auth_request_ip_address(Rest, 0, 0, F@_1, F@_2,
-					  F@_3, F@_4, F@_5, F@_6, F@_7,
-					  TrUserData);
+	  d_field_auth_request_password(Rest, 0, 0, F@_1, F@_2,
+					F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+					F@_15, TrUserData);
       34 ->
 	  d_field_auth_request_protocol(Rest, 0, 0, F@_1, F@_2,
-					F@_3, F@_4, F@_5, F@_6, F@_7,
-					TrUserData);
-      40 ->
-	  d_field_auth_request_port(Rest, 0, 0, F@_1, F@_2, F@_3,
-				    F@_4, F@_5, F@_6, F@_7, TrUserData);
-      50 ->
+					F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+					F@_15, TrUserData);
+      42 ->
+	  d_field_auth_request_peerhost(Rest, 0, 0, F@_1, F@_2,
+					F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+					F@_15, TrUserData);
+      48 ->
+	  d_field_auth_request_sockport(Rest, 0, 0, F@_1, F@_2,
+					F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+					F@_15, TrUserData);
+      58 ->
+	  d_field_auth_request_peercert(Rest, 0, 0, F@_1, F@_2,
+					F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+					F@_15, TrUserData);
+      64 ->
+	  d_field_auth_request_is_bridge(Rest, 0, 0, F@_1, F@_2,
+					 F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					 F@_9, F@_10, F@_11, F@_12, F@_13,
+					 F@_14, F@_15, TrUserData);
+      72 ->
+	  d_field_auth_request_is_superuser(Rest, 0, 0, F@_1,
+					    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+					    F@_8, F@_9, F@_10, F@_11, F@_12,
+					    F@_13, F@_14, F@_15, TrUserData);
+      82 ->
+	  d_field_auth_request_mountpoint(Rest, 0, 0, F@_1, F@_2,
+					  F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					  F@_9, F@_10, F@_11, F@_12, F@_13,
+					  F@_14, F@_15, TrUserData);
+      90 ->
+	  d_field_auth_request_zone(Rest, 0, 0, F@_1, F@_2, F@_3,
+				    F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+				    F@_11, F@_12, F@_13, F@_14, F@_15,
+				    TrUserData);
+      98 ->
 	  d_field_auth_request_tls_common_name(Rest, 0, 0, F@_1,
 					       F@_2, F@_3, F@_4, F@_5, F@_6,
-					       F@_7, TrUserData);
-      58 ->
+					       F@_7, F@_8, F@_9, F@_10, F@_11,
+					       F@_12, F@_13, F@_14, F@_15,
+					       TrUserData);
+      106 ->
 	  d_field_auth_request_tls_subject(Rest, 0, 0, F@_1, F@_2,
-					   F@_3, F@_4, F@_5, F@_6, F@_7,
-					   TrUserData);
+					   F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					   F@_9, F@_10, F@_11, F@_12, F@_13,
+					   F@_14, F@_15, TrUserData);
+      114 ->
+	  d_field_auth_request_topic(Rest, 0, 0, F@_1, F@_2, F@_3,
+				     F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+				     F@_11, F@_12, F@_13, F@_14, F@_15,
+				     TrUserData);
+      122 ->
+	  d_field_auth_request_access(Rest, 0, 0, F@_1, F@_2,
+				      F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				      F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				      TrUserData);
       _ ->
 	  case Key band 7 of
 	    0 ->
 		skip_varint_auth_request(Rest, 0, 0, F@_1, F@_2, F@_3,
-					 F@_4, F@_5, F@_6, F@_7, TrUserData);
+					 F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+					 F@_10, F@_11, F@_12, F@_13, F@_14,
+					 F@_15, TrUserData);
 	    1 ->
 		skip_64_auth_request(Rest, 0, 0, F@_1, F@_2, F@_3, F@_4,
-				     F@_5, F@_6, F@_7, TrUserData);
+				     F@_5, F@_6, F@_7, F@_8, F@_9, F@_10, F@_11,
+				     F@_12, F@_13, F@_14, F@_15, TrUserData);
 	    2 ->
 		skip_length_delimited_auth_request(Rest, 0, 0, F@_1,
 						   F@_2, F@_3, F@_4, F@_5, F@_6,
-						   F@_7, TrUserData);
+						   F@_7, F@_8, F@_9, F@_10,
+						   F@_11, F@_12, F@_13, F@_14,
+						   F@_15, TrUserData);
 	    3 ->
 		skip_group_auth_request(Rest, Key bsr 3, 0, F@_1, F@_2,
-					F@_3, F@_4, F@_5, F@_6, F@_7,
-					TrUserData);
+					F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+					F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+					F@_15, TrUserData);
 	    5 ->
 		skip_32_auth_request(Rest, 0, 0, F@_1, F@_2, F@_3, F@_4,
-				     F@_5, F@_6, F@_7, TrUserData)
+				     F@_5, F@_6, F@_7, F@_8, F@_9, F@_10, F@_11,
+				     F@_12, F@_13, F@_14, F@_15, TrUserData)
 	  end
     end;
 dg_read_field_def_auth_request(<<>>, 0, 0, F@_1, F@_2,
-			       F@_3, F@_4, F@_5, F@_6, F@_7, _) ->
-    #{username => F@_1, client_id => F@_2,
-      ip_address => F@_3, protocol => F@_4, port => F@_5,
-      tls_common_name => F@_6, tls_subject => F@_7}.
+			       F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+			       F@_11, F@_12, F@_13, F@_14, F@_15, _) ->
+    #{client_id => F@_1, username => F@_2, password => F@_3,
+      protocol => F@_4, peerhost => F@_5, sockport => F@_6,
+      peercert => F@_7, is_bridge => F@_8,
+      is_superuser => F@_9, mountpoint => F@_10,
+      zone => F@_11, tls_common_name => F@_12,
+      tls_subject => F@_13, topic => F@_14, access => F@_15}.
 
-d_field_auth_request_username(<<1:1, X:7, Rest/binary>>,
-			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			      TrUserData)
+d_field_auth_request_client_id(<<1:1, X:7,
+				 Rest/binary>>,
+			       N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			       F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			       F@_15, TrUserData)
     when N < 57 ->
-    d_field_auth_request_username(Rest, N + 7,
-				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				  F@_6, F@_7, TrUserData);
-d_field_auth_request_username(<<0:1, X:7, Rest/binary>>,
-			      N, Acc, _, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			      TrUserData) ->
+    d_field_auth_request_client_id(Rest, N + 7,
+				   X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				   F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				   F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_client_id(<<0:1, X:7,
+				 Rest/binary>>,
+			       N, Acc, _, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			       F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			       F@_15, TrUserData) ->
     {NewFValue, RestF} = begin
 			   Len = X bsl N + Acc,
 			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
 			   {id(binary:copy(Bytes), TrUserData), Rest2}
 			 end,
     dfp_read_field_def_auth_request(RestF, 0, 0, NewFValue,
-				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				    TrUserData).
+				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
 
-d_field_auth_request_client_id(<<1:1, X:7,
-				 Rest/binary>>,
-			       N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			       TrUserData)
+d_field_auth_request_username(<<1:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData)
     when N < 57 ->
-    d_field_auth_request_client_id(Rest, N + 7,
-				   X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				   F@_6, F@_7, TrUserData);
-d_field_auth_request_client_id(<<0:1, X:7,
-				 Rest/binary>>,
-			       N, Acc, F@_1, _, F@_3, F@_4, F@_5, F@_6, F@_7,
-			       TrUserData) ->
+    d_field_auth_request_username(Rest, N + 7,
+				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				  F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				  F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_username(<<0:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, _, F@_3, F@_4, F@_5, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData) ->
     {NewFValue, RestF} = begin
 			   Len = X bsl N + Acc,
 			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
@@ -641,58 +805,91 @@ d_field_auth_request_client_id(<<0:1, X:7,
 			 end,
     dfp_read_field_def_auth_request(RestF, 0, 0, F@_1,
 				    NewFValue, F@_3, F@_4, F@_5, F@_6, F@_7,
-				    TrUserData).
+				    F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				    F@_14, F@_15, TrUserData).
 
-d_field_auth_request_ip_address(<<1:1, X:7,
-				  Rest/binary>>,
-				N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				F@_7, TrUserData)
+d_field_auth_request_password(<<1:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData)
     when N < 57 ->
-    d_field_auth_request_ip_address(Rest, N + 7,
-				    X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				    F@_6, F@_7, TrUserData);
-d_field_auth_request_ip_address(<<0:1, X:7,
-				  Rest/binary>>,
-				N, Acc, F@_1, F@_2, _, F@_4, F@_5, F@_6, F@_7,
-				TrUserData) ->
+    d_field_auth_request_password(Rest, N + 7,
+				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				  F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				  F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_password(<<0:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, _, F@_4, F@_5, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData) ->
     {NewFValue, RestF} = begin
 			   Len = X bsl N + Acc,
 			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
 			   {id(binary:copy(Bytes), TrUserData), Rest2}
 			 end,
     dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
-				    NewFValue, F@_4, F@_5, F@_6, F@_7,
-				    TrUserData).
+				    NewFValue, F@_4, F@_5, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
 
 d_field_auth_request_protocol(<<1:1, X:7, Rest/binary>>,
 			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			      TrUserData)
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData)
     when N < 57 ->
     d_field_auth_request_protocol(Rest, N + 7,
 				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				  F@_6, F@_7, TrUserData);
+				  F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				  F@_13, F@_14, F@_15, TrUserData);
 d_field_auth_request_protocol(<<0:1, X:7, Rest/binary>>,
 			      N, Acc, F@_1, F@_2, F@_3, _, F@_5, F@_6, F@_7,
-			      TrUserData) ->
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData) ->
     {NewFValue, RestF} = begin
 			   Len = X bsl N + Acc,
 			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
 			   {id(binary:copy(Bytes), TrUserData), Rest2}
 			 end,
     dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
-				    F@_3, NewFValue, F@_5, F@_6, F@_7,
-				    TrUserData).
+				    F@_3, NewFValue, F@_5, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
 
-d_field_auth_request_port(<<1:1, X:7, Rest/binary>>, N,
-			  Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			  TrUserData)
+d_field_auth_request_peerhost(<<1:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData)
     when N < 57 ->
-    d_field_auth_request_port(Rest, N + 7, X bsl N + Acc,
-			      F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-			      TrUserData);
-d_field_auth_request_port(<<0:1, X:7, Rest/binary>>, N,
-			  Acc, F@_1, F@_2, F@_3, F@_4, _, F@_6, F@_7,
-			  TrUserData) ->
+    d_field_auth_request_peerhost(Rest, N + 7,
+				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				  F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				  F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_peerhost(<<0:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, _, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData) ->
+    {NewFValue, RestF} = begin
+			   Len = X bsl N + Acc,
+			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
+			   {id(binary:copy(Bytes), TrUserData), Rest2}
+			 end,
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, NewFValue, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
+
+d_field_auth_request_sockport(<<1:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData)
+    when N < 57 ->
+    d_field_auth_request_sockport(Rest, N + 7,
+				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				  F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				  F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_sockport(<<0:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, _, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData) ->
     {NewFValue, RestF} = {begin
 			    <<Res:32/signed-native>> = <<(X bsl N +
 							    Acc):32/unsigned-native>>,
@@ -700,166 +897,392 @@ d_field_auth_request_port(<<0:1, X:7, Rest/binary>>, N,
 			  end,
 			  Rest},
     dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
-				    F@_3, F@_4, NewFValue, F@_6, F@_7,
-				    TrUserData).
+				    F@_3, F@_4, F@_5, NewFValue, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
+
+d_field_auth_request_peercert(<<1:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData)
+    when N < 57 ->
+    d_field_auth_request_peercert(Rest, N + 7,
+				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				  F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				  F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_peercert(<<0:1, X:7, Rest/binary>>,
+			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, _,
+			      F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			      F@_15, TrUserData) ->
+    {NewFValue, RestF} = begin
+			   Len = X bsl N + Acc,
+			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
+			   {id(binary:copy(Bytes), TrUserData), Rest2}
+			 end,
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, F@_5, F@_6, NewFValue, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
+
+d_field_auth_request_is_bridge(<<1:1, X:7,
+				 Rest/binary>>,
+			       N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			       F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			       F@_15, TrUserData)
+    when N < 57 ->
+    d_field_auth_request_is_bridge(Rest, N + 7,
+				   X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				   F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				   F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_is_bridge(<<0:1, X:7,
+				 Rest/binary>>,
+			       N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			       _, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			       F@_15, TrUserData) ->
+    {NewFValue, RestF} = {id(X bsl N + Acc =/= 0,
+			     TrUserData),
+			  Rest},
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, F@_5, F@_6, F@_7, NewFValue,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
+
+d_field_auth_request_is_superuser(<<1:1, X:7,
+				    Rest/binary>>,
+				  N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				  F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				  F@_14, F@_15, TrUserData)
+    when N < 57 ->
+    d_field_auth_request_is_superuser(Rest, N + 7,
+				      X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
+				      F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+				      F@_11, F@_12, F@_13, F@_14, F@_15,
+				      TrUserData);
+d_field_auth_request_is_superuser(<<0:1, X:7,
+				    Rest/binary>>,
+				  N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				  F@_7, F@_8, _, F@_10, F@_11, F@_12, F@_13,
+				  F@_14, F@_15, TrUserData) ->
+    {NewFValue, RestF} = {id(X bsl N + Acc =/= 0,
+			     TrUserData),
+			  Rest},
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				    NewFValue, F@_10, F@_11, F@_12, F@_13,
+				    F@_14, F@_15, TrUserData).
+
+d_field_auth_request_mountpoint(<<1:1, X:7,
+				  Rest/binary>>,
+				N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				F@_14, F@_15, TrUserData)
+    when N < 57 ->
+    d_field_auth_request_mountpoint(Rest, N + 7,
+				    X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				    F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				    F@_13, F@_14, F@_15, TrUserData);
+d_field_auth_request_mountpoint(<<0:1, X:7,
+				  Rest/binary>>,
+				N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				F@_7, F@_8, F@_9, _, F@_11, F@_12, F@_13, F@_14,
+				F@_15, TrUserData) ->
+    {NewFValue, RestF} = begin
+			   Len = X bsl N + Acc,
+			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
+			   {id(binary:copy(Bytes), TrUserData), Rest2}
+			 end,
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    NewFValue, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
+
+d_field_auth_request_zone(<<1:1, X:7, Rest/binary>>, N,
+			  Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			  F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+			  TrUserData)
+    when N < 57 ->
+    d_field_auth_request_zone(Rest, N + 7, X bsl N + Acc,
+			      F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			      F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+			      TrUserData);
+d_field_auth_request_zone(<<0:1, X:7, Rest/binary>>, N,
+			  Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			  F@_9, F@_10, _, F@_12, F@_13, F@_14, F@_15,
+			  TrUserData) ->
+    {NewFValue, RestF} = begin
+			   Len = X bsl N + Acc,
+			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
+			   {id(binary:copy(Bytes), TrUserData), Rest2}
+			 end,
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    F@_10, NewFValue, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
 
 d_field_auth_request_tls_common_name(<<1:1, X:7,
 				       Rest/binary>>,
 				     N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				     F@_7, TrUserData)
+				     F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+				     F@_13, F@_14, F@_15, TrUserData)
     when N < 57 ->
     d_field_auth_request_tls_common_name(Rest, N + 7,
 					 X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
-					 F@_5, F@_6, F@_7, TrUserData);
+					 F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+					 F@_11, F@_12, F@_13, F@_14, F@_15,
+					 TrUserData);
 d_field_auth_request_tls_common_name(<<0:1, X:7,
 				       Rest/binary>>,
-				     N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, _,
-				     F@_7, TrUserData) ->
+				     N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				     F@_7, F@_8, F@_9, F@_10, F@_11, _, F@_13,
+				     F@_14, F@_15, TrUserData) ->
     {NewFValue, RestF} = begin
 			   Len = X bsl N + Acc,
 			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
 			   {id(binary:copy(Bytes), TrUserData), Rest2}
 			 end,
     dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
-				    F@_3, F@_4, F@_5, NewFValue, F@_7,
-				    TrUserData).
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    F@_10, F@_11, NewFValue, F@_13, F@_14,
+				    F@_15, TrUserData).
 
 d_field_auth_request_tls_subject(<<1:1, X:7,
 				   Rest/binary>>,
 				 N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				 F@_7, TrUserData)
+				 F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				 F@_14, F@_15, TrUserData)
     when N < 57 ->
     d_field_auth_request_tls_subject(Rest, N + 7,
 				     X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
-				     F@_5, F@_6, F@_7, TrUserData);
+				     F@_5, F@_6, F@_7, F@_8, F@_9, F@_10, F@_11,
+				     F@_12, F@_13, F@_14, F@_15, TrUserData);
 d_field_auth_request_tls_subject(<<0:1, X:7,
 				   Rest/binary>>,
-				 N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, _,
-				 TrUserData) ->
+				 N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
+				 F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, _,
+				 F@_14, F@_15, TrUserData) ->
     {NewFValue, RestF} = begin
 			   Len = X bsl N + Acc,
 			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
 			   {id(binary:copy(Bytes), TrUserData), Rest2}
 			 end,
     dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
-				    F@_3, F@_4, F@_5, F@_6, NewFValue,
-				    TrUserData).
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    F@_10, F@_11, F@_12, NewFValue, F@_14,
+				    F@_15, TrUserData).
+
+d_field_auth_request_topic(<<1:1, X:7, Rest/binary>>, N,
+			   Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			   F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+			   TrUserData)
+    when N < 57 ->
+    d_field_auth_request_topic(Rest, N + 7, X bsl N + Acc,
+			       F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			       F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+			       TrUserData);
+d_field_auth_request_topic(<<0:1, X:7, Rest/binary>>, N,
+			   Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			   F@_9, F@_10, F@_11, F@_12, F@_13, _, F@_15,
+			   TrUserData) ->
+    {NewFValue, RestF} = begin
+			   Len = X bsl N + Acc,
+			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
+			   {id(binary:copy(Bytes), TrUserData), Rest2}
+			 end,
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    F@_10, F@_11, F@_12, F@_13, NewFValue,
+				    F@_15, TrUserData).
+
+d_field_auth_request_access(<<1:1, X:7, Rest/binary>>,
+			    N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			    F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+			    F@_15, TrUserData)
+    when N < 57 ->
+    d_field_auth_request_access(Rest, N + 7, X bsl N + Acc,
+				F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				TrUserData);
+d_field_auth_request_access(<<0:1, X:7, Rest/binary>>,
+			    N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			    F@_8, F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, _,
+			    TrUserData) ->
+    {NewFValue, RestF} = begin
+			   Len = X bsl N + Acc,
+			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
+			   {id(binary:copy(Bytes), TrUserData), Rest2}
+			 end,
+    dfp_read_field_def_auth_request(RestF, 0, 0, F@_1, F@_2,
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    F@_10, F@_11, F@_12, F@_13, F@_14,
+				    NewFValue, TrUserData).
 
 skip_varint_auth_request(<<1:1, _:7, Rest/binary>>, Z1,
-			 Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			 Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			 F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
 			 TrUserData) ->
     skip_varint_auth_request(Rest, Z1, Z2, F@_1, F@_2, F@_3,
-			     F@_4, F@_5, F@_6, F@_7, TrUserData);
+			     F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10, F@_11,
+			     F@_12, F@_13, F@_14, F@_15, TrUserData);
 skip_varint_auth_request(<<0:1, _:7, Rest/binary>>, Z1,
-			 Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
+			 Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+			 F@_9, F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
 			 TrUserData) ->
     dfp_read_field_def_auth_request(Rest, Z1, Z2, F@_1,
-				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				    TrUserData).
+				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
 
 skip_length_delimited_auth_request(<<1:1, X:7,
 				     Rest/binary>>,
 				   N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				   F@_7, TrUserData)
+				   F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				   F@_14, F@_15, TrUserData)
     when N < 57 ->
     skip_length_delimited_auth_request(Rest, N + 7,
 				       X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
-				       F@_5, F@_6, F@_7, TrUserData);
+				       F@_5, F@_6, F@_7, F@_8, F@_9, F@_10,
+				       F@_11, F@_12, F@_13, F@_14, F@_15,
+				       TrUserData);
 skip_length_delimited_auth_request(<<0:1, X:7,
 				     Rest/binary>>,
 				   N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				   F@_7, TrUserData) ->
+				   F@_7, F@_8, F@_9, F@_10, F@_11, F@_12, F@_13,
+				   F@_14, F@_15, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
     dfp_read_field_def_auth_request(Rest2, 0, 0, F@_1, F@_2,
-				    F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData).
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				    TrUserData).
 
 skip_group_auth_request(Bin, FNum, Z2, F@_1, F@_2, F@_3,
-			F@_4, F@_5, F@_6, F@_7, TrUserData) ->
+			F@_4, F@_5, F@_6, F@_7, F@_8, F@_9, F@_10, F@_11, F@_12,
+			F@_13, F@_14, F@_15, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_auth_request(Rest, 0, Z2, F@_1, F@_2,
-				    F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData).
+				    F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+				    F@_10, F@_11, F@_12, F@_13, F@_14, F@_15,
+				    TrUserData).
 
 skip_32_auth_request(<<_:32, Rest/binary>>, Z1, Z2,
-		     F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData) ->
+		     F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+		     F@_10, F@_11, F@_12, F@_13, F@_14, F@_15, TrUserData) ->
     dfp_read_field_def_auth_request(Rest, Z1, Z2, F@_1,
-				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				    TrUserData).
+				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
 
 skip_64_auth_request(<<_:64, Rest/binary>>, Z1, Z2,
-		     F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, TrUserData) ->
+		     F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8, F@_9,
+		     F@_10, F@_11, F@_12, F@_13, F@_14, F@_15, TrUserData) ->
     dfp_read_field_def_auth_request(Rest, Z1, Z2, F@_1,
-				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7,
-				    TrUserData).
+				    F@_2, F@_3, F@_4, F@_5, F@_6, F@_7, F@_8,
+				    F@_9, F@_10, F@_11, F@_12, F@_13, F@_14,
+				    F@_15, TrUserData).
 
 decode_msg_auth_response(Bin, TrUserData) ->
     dfp_read_field_def_auth_response(Bin, 0, 0,
 				     id(0, TrUserData), id(<<>>, TrUserData),
-				     TrUserData).
+				     id(false, TrUserData),
+				     id(false, TrUserData),
+				     id(<<>>, TrUserData), TrUserData).
 
 dfp_read_field_def_auth_response(<<8, Rest/binary>>, Z1,
-				 Z2, F@_1, F@_2, TrUserData) ->
+				 Z2, F@_1, F@_2, F@_3, F@_4, F@_5,
+				 TrUserData) ->
     d_field_auth_response_code(Rest, Z1, Z2, F@_1, F@_2,
-			       TrUserData);
+			       F@_3, F@_4, F@_5, TrUserData);
 dfp_read_field_def_auth_response(<<18, Rest/binary>>,
-				 Z1, Z2, F@_1, F@_2, TrUserData) ->
+				 Z1, Z2, F@_1, F@_2, F@_3, F@_4, F@_5,
+				 TrUserData) ->
     d_field_auth_response_msg(Rest, Z1, Z2, F@_1, F@_2,
-			      TrUserData);
+			      F@_3, F@_4, F@_5, TrUserData);
+dfp_read_field_def_auth_response(<<24, Rest/binary>>,
+				 Z1, Z2, F@_1, F@_2, F@_3, F@_4, F@_5,
+				 TrUserData) ->
+    d_field_auth_response_is_superuser(Rest, Z1, Z2, F@_1,
+				       F@_2, F@_3, F@_4, F@_5, TrUserData);
+dfp_read_field_def_auth_response(<<32, Rest/binary>>,
+				 Z1, Z2, F@_1, F@_2, F@_3, F@_4, F@_5,
+				 TrUserData) ->
+    d_field_auth_response_anonymous(Rest, Z1, Z2, F@_1,
+				    F@_2, F@_3, F@_4, F@_5, TrUserData);
+dfp_read_field_def_auth_response(<<50, Rest/binary>>,
+				 Z1, Z2, F@_1, F@_2, F@_3, F@_4, F@_5,
+				 TrUserData) ->
+    d_field_auth_response_mountpoint(Rest, Z1, Z2, F@_1,
+				     F@_2, F@_3, F@_4, F@_5, TrUserData);
 dfp_read_field_def_auth_response(<<>>, 0, 0, F@_1, F@_2,
-				 _) ->
-    #{code => F@_1, msg => F@_2};
+				 F@_3, F@_4, F@_5, _) ->
+    #{code => F@_1, msg => F@_2, is_superuser => F@_3,
+      anonymous => F@_4, mountpoint => F@_5};
 dfp_read_field_def_auth_response(Other, Z1, Z2, F@_1,
-				 F@_2, TrUserData) ->
+				 F@_2, F@_3, F@_4, F@_5, TrUserData) ->
     dg_read_field_def_auth_response(Other, Z1, Z2, F@_1,
-				    F@_2, TrUserData).
+				    F@_2, F@_3, F@_4, F@_5, TrUserData).
 
 dg_read_field_def_auth_response(<<1:1, X:7,
 				  Rest/binary>>,
-				N, Acc, F@_1, F@_2, TrUserData)
+				N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				TrUserData)
     when N < 32 - 7 ->
     dg_read_field_def_auth_response(Rest, N + 7,
-				    X bsl N + Acc, F@_1, F@_2, TrUserData);
+				    X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				    TrUserData);
 dg_read_field_def_auth_response(<<0:1, X:7,
 				  Rest/binary>>,
-				N, Acc, F@_1, F@_2, TrUserData) ->
+				N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
       8 ->
-	  d_field_auth_response_code(Rest, 0, 0, F@_1, F@_2,
-				     TrUserData);
+	  d_field_auth_response_code(Rest, 0, 0, F@_1, F@_2, F@_3,
+				     F@_4, F@_5, TrUserData);
       18 ->
-	  d_field_auth_response_msg(Rest, 0, 0, F@_1, F@_2,
-				    TrUserData);
+	  d_field_auth_response_msg(Rest, 0, 0, F@_1, F@_2, F@_3,
+				    F@_4, F@_5, TrUserData);
+      24 ->
+	  d_field_auth_response_is_superuser(Rest, 0, 0, F@_1,
+					     F@_2, F@_3, F@_4, F@_5,
+					     TrUserData);
+      32 ->
+	  d_field_auth_response_anonymous(Rest, 0, 0, F@_1, F@_2,
+					  F@_3, F@_4, F@_5, TrUserData);
+      50 ->
+	  d_field_auth_response_mountpoint(Rest, 0, 0, F@_1, F@_2,
+					   F@_3, F@_4, F@_5, TrUserData);
       _ ->
 	  case Key band 7 of
 	    0 ->
-		skip_varint_auth_response(Rest, 0, 0, F@_1, F@_2,
-					  TrUserData);
+		skip_varint_auth_response(Rest, 0, 0, F@_1, F@_2, F@_3,
+					  F@_4, F@_5, TrUserData);
 	    1 ->
-		skip_64_auth_response(Rest, 0, 0, F@_1, F@_2,
-				      TrUserData);
+		skip_64_auth_response(Rest, 0, 0, F@_1, F@_2, F@_3,
+				      F@_4, F@_5, TrUserData);
 	    2 ->
 		skip_length_delimited_auth_response(Rest, 0, 0, F@_1,
-						    F@_2, TrUserData);
+						    F@_2, F@_3, F@_4, F@_5,
+						    TrUserData);
 	    3 ->
 		skip_group_auth_response(Rest, Key bsr 3, 0, F@_1, F@_2,
-					 TrUserData);
+					 F@_3, F@_4, F@_5, TrUserData);
 	    5 ->
-		skip_32_auth_response(Rest, 0, 0, F@_1, F@_2,
-				      TrUserData)
+		skip_32_auth_response(Rest, 0, 0, F@_1, F@_2, F@_3,
+				      F@_4, F@_5, TrUserData)
 	  end
     end;
 dg_read_field_def_auth_response(<<>>, 0, 0, F@_1, F@_2,
-				_) ->
-    #{code => F@_1, msg => F@_2}.
+				F@_3, F@_4, F@_5, _) ->
+    #{code => F@_1, msg => F@_2, is_superuser => F@_3,
+      anonymous => F@_4, mountpoint => F@_5}.
 
 d_field_auth_response_code(<<1:1, X:7, Rest/binary>>, N,
-			   Acc, F@_1, F@_2, TrUserData)
+			   Acc, F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData)
     when N < 57 ->
     d_field_auth_response_code(Rest, N + 7, X bsl N + Acc,
-			       F@_1, F@_2, TrUserData);
+			       F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData);
 d_field_auth_response_code(<<0:1, X:7, Rest/binary>>, N,
-			   Acc, _, F@_2, TrUserData) ->
+			   Acc, _, F@_2, F@_3, F@_4, F@_5, TrUserData) ->
     {NewFValue, RestF} = {begin
 			    <<Res:32/signed-native>> = <<(X bsl N +
 							    Acc):32/unsigned-native>>,
@@ -867,446 +1290,120 @@ d_field_auth_response_code(<<0:1, X:7, Rest/binary>>, N,
 			  end,
 			  Rest},
     dfp_read_field_def_auth_response(RestF, 0, 0, NewFValue,
-				     F@_2, TrUserData).
+				     F@_2, F@_3, F@_4, F@_5, TrUserData).
 
 d_field_auth_response_msg(<<1:1, X:7, Rest/binary>>, N,
-			  Acc, F@_1, F@_2, TrUserData)
+			  Acc, F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData)
     when N < 57 ->
     d_field_auth_response_msg(Rest, N + 7, X bsl N + Acc,
-			      F@_1, F@_2, TrUserData);
+			      F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData);
 d_field_auth_response_msg(<<0:1, X:7, Rest/binary>>, N,
-			  Acc, F@_1, _, TrUserData) ->
+			  Acc, F@_1, _, F@_3, F@_4, F@_5, TrUserData) ->
     {NewFValue, RestF} = begin
 			   Len = X bsl N + Acc,
 			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
 			   {id(binary:copy(Bytes), TrUserData), Rest2}
 			 end,
     dfp_read_field_def_auth_response(RestF, 0, 0, F@_1,
-				     NewFValue, TrUserData).
+				     NewFValue, F@_3, F@_4, F@_5, TrUserData).
+
+d_field_auth_response_is_superuser(<<1:1, X:7,
+				     Rest/binary>>,
+				   N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				   TrUserData)
+    when N < 57 ->
+    d_field_auth_response_is_superuser(Rest, N + 7,
+				       X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
+				       F@_5, TrUserData);
+d_field_auth_response_is_superuser(<<0:1, X:7,
+				     Rest/binary>>,
+				   N, Acc, F@_1, F@_2, _, F@_4, F@_5,
+				   TrUserData) ->
+    {NewFValue, RestF} = {id(X bsl N + Acc =/= 0,
+			     TrUserData),
+			  Rest},
+    dfp_read_field_def_auth_response(RestF, 0, 0, F@_1,
+				     F@_2, NewFValue, F@_4, F@_5, TrUserData).
+
+d_field_auth_response_anonymous(<<1:1, X:7,
+				  Rest/binary>>,
+				N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				TrUserData)
+    when N < 57 ->
+    d_field_auth_response_anonymous(Rest, N + 7,
+				    X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				    TrUserData);
+d_field_auth_response_anonymous(<<0:1, X:7,
+				  Rest/binary>>,
+				N, Acc, F@_1, F@_2, F@_3, _, F@_5,
+				TrUserData) ->
+    {NewFValue, RestF} = {id(X bsl N + Acc =/= 0,
+			     TrUserData),
+			  Rest},
+    dfp_read_field_def_auth_response(RestF, 0, 0, F@_1,
+				     F@_2, F@_3, NewFValue, F@_5, TrUserData).
+
+d_field_auth_response_mountpoint(<<1:1, X:7,
+				   Rest/binary>>,
+				 N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				 TrUserData)
+    when N < 57 ->
+    d_field_auth_response_mountpoint(Rest, N + 7,
+				     X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
+				     F@_5, TrUserData);
+d_field_auth_response_mountpoint(<<0:1, X:7,
+				   Rest/binary>>,
+				 N, Acc, F@_1, F@_2, F@_3, F@_4, _,
+				 TrUserData) ->
+    {NewFValue, RestF} = begin
+			   Len = X bsl N + Acc,
+			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
+			   {id(binary:copy(Bytes), TrUserData), Rest2}
+			 end,
+    dfp_read_field_def_auth_response(RestF, 0, 0, F@_1,
+				     F@_2, F@_3, F@_4, NewFValue, TrUserData).
 
 skip_varint_auth_response(<<1:1, _:7, Rest/binary>>, Z1,
-			  Z2, F@_1, F@_2, TrUserData) ->
+			  Z2, F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData) ->
     skip_varint_auth_response(Rest, Z1, Z2, F@_1, F@_2,
-			      TrUserData);
+			      F@_3, F@_4, F@_5, TrUserData);
 skip_varint_auth_response(<<0:1, _:7, Rest/binary>>, Z1,
-			  Z2, F@_1, F@_2, TrUserData) ->
+			  Z2, F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData) ->
     dfp_read_field_def_auth_response(Rest, Z1, Z2, F@_1,
-				     F@_2, TrUserData).
+				     F@_2, F@_3, F@_4, F@_5, TrUserData).
 
 skip_length_delimited_auth_response(<<1:1, X:7,
 				      Rest/binary>>,
-				    N, Acc, F@_1, F@_2, TrUserData)
+				    N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				    TrUserData)
     when N < 57 ->
     skip_length_delimited_auth_response(Rest, N + 7,
-					X bsl N + Acc, F@_1, F@_2, TrUserData);
+					X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
+					F@_5, TrUserData);
 skip_length_delimited_auth_response(<<0:1, X:7,
 				      Rest/binary>>,
-				    N, Acc, F@_1, F@_2, TrUserData) ->
+				    N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
+				    TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
     dfp_read_field_def_auth_response(Rest2, 0, 0, F@_1,
-				     F@_2, TrUserData).
+				     F@_2, F@_3, F@_4, F@_5, TrUserData).
 
 skip_group_auth_response(Bin, FNum, Z2, F@_1, F@_2,
-			 TrUserData) ->
+			 F@_3, F@_4, F@_5, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_auth_response(Rest, 0, Z2, F@_1,
-				     F@_2, TrUserData).
+				     F@_2, F@_3, F@_4, F@_5, TrUserData).
 
 skip_32_auth_response(<<_:32, Rest/binary>>, Z1, Z2,
-		      F@_1, F@_2, TrUserData) ->
+		      F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData) ->
     dfp_read_field_def_auth_response(Rest, Z1, Z2, F@_1,
-				     F@_2, TrUserData).
+				     F@_2, F@_3, F@_4, F@_5, TrUserData).
 
 skip_64_auth_response(<<_:64, Rest/binary>>, Z1, Z2,
-		      F@_1, F@_2, TrUserData) ->
+		      F@_1, F@_2, F@_3, F@_4, F@_5, TrUserData) ->
     dfp_read_field_def_auth_response(Rest, Z1, Z2, F@_1,
-				     F@_2, TrUserData).
-
-decode_msg_acl_request(Bin, TrUserData) ->
-    dfp_read_field_def_acl_request(Bin, 0, 0,
-				   id(<<>>, TrUserData), id(<<>>, TrUserData),
-				   id(<<>>, TrUserData), id(<<>>, TrUserData),
-				   id(<<>>, TrUserData), id(<<>>, TrUserData),
-				   TrUserData).
-
-dfp_read_field_def_acl_request(<<10, Rest/binary>>, Z1,
-			       Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			       TrUserData) ->
-    d_field_acl_request_username(Rest, Z1, Z2, F@_1, F@_2,
-				 F@_3, F@_4, F@_5, F@_6, TrUserData);
-dfp_read_field_def_acl_request(<<18, Rest/binary>>, Z1,
-			       Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			       TrUserData) ->
-    d_field_acl_request_client_id(Rest, Z1, Z2, F@_1, F@_2,
-				  F@_3, F@_4, F@_5, F@_6, TrUserData);
-dfp_read_field_def_acl_request(<<26, Rest/binary>>, Z1,
-			       Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			       TrUserData) ->
-    d_field_acl_request_ip_address(Rest, Z1, Z2, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, F@_6, TrUserData);
-dfp_read_field_def_acl_request(<<34, Rest/binary>>, Z1,
-			       Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			       TrUserData) ->
-    d_field_acl_request_protocol(Rest, Z1, Z2, F@_1, F@_2,
-				 F@_3, F@_4, F@_5, F@_6, TrUserData);
-dfp_read_field_def_acl_request(<<42, Rest/binary>>, Z1,
-			       Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			       TrUserData) ->
-    d_field_acl_request_mount_point(Rest, Z1, Z2, F@_1,
-				    F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData);
-dfp_read_field_def_acl_request(<<50, Rest/binary>>, Z1,
-			       Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			       TrUserData) ->
-    d_field_acl_request_topic(Rest, Z1, Z2, F@_1, F@_2,
-			      F@_3, F@_4, F@_5, F@_6, TrUserData);
-dfp_read_field_def_acl_request(<<>>, 0, 0, F@_1, F@_2,
-			       F@_3, F@_4, F@_5, F@_6, _) ->
-    #{username => F@_1, client_id => F@_2,
-      ip_address => F@_3, protocol => F@_4,
-      mount_point => F@_5, topic => F@_6};
-dfp_read_field_def_acl_request(Other, Z1, Z2, F@_1,
-			       F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData) ->
-    dg_read_field_def_acl_request(Other, Z1, Z2, F@_1, F@_2,
-				  F@_3, F@_4, F@_5, F@_6, TrUserData).
-
-dg_read_field_def_acl_request(<<1:1, X:7, Rest/binary>>,
-			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			      TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_acl_request(Rest, N + 7,
-				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				  F@_6, TrUserData);
-dg_read_field_def_acl_request(<<0:1, X:7, Rest/binary>>,
-			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			      TrUserData) ->
-    Key = X bsl N + Acc,
-    case Key of
-      10 ->
-	  d_field_acl_request_username(Rest, 0, 0, F@_1, F@_2,
-				       F@_3, F@_4, F@_5, F@_6, TrUserData);
-      18 ->
-	  d_field_acl_request_client_id(Rest, 0, 0, F@_1, F@_2,
-					F@_3, F@_4, F@_5, F@_6, TrUserData);
-      26 ->
-	  d_field_acl_request_ip_address(Rest, 0, 0, F@_1, F@_2,
-					 F@_3, F@_4, F@_5, F@_6, TrUserData);
-      34 ->
-	  d_field_acl_request_protocol(Rest, 0, 0, F@_1, F@_2,
-				       F@_3, F@_4, F@_5, F@_6, TrUserData);
-      42 ->
-	  d_field_acl_request_mount_point(Rest, 0, 0, F@_1, F@_2,
-					  F@_3, F@_4, F@_5, F@_6, TrUserData);
-      50 ->
-	  d_field_acl_request_topic(Rest, 0, 0, F@_1, F@_2, F@_3,
-				    F@_4, F@_5, F@_6, TrUserData);
-      _ ->
-	  case Key band 7 of
-	    0 ->
-		skip_varint_acl_request(Rest, 0, 0, F@_1, F@_2, F@_3,
-					F@_4, F@_5, F@_6, TrUserData);
-	    1 ->
-		skip_64_acl_request(Rest, 0, 0, F@_1, F@_2, F@_3, F@_4,
-				    F@_5, F@_6, TrUserData);
-	    2 ->
-		skip_length_delimited_acl_request(Rest, 0, 0, F@_1,
-						  F@_2, F@_3, F@_4, F@_5, F@_6,
-						  TrUserData);
-	    3 ->
-		skip_group_acl_request(Rest, Key bsr 3, 0, F@_1, F@_2,
-				       F@_3, F@_4, F@_5, F@_6, TrUserData);
-	    5 ->
-		skip_32_acl_request(Rest, 0, 0, F@_1, F@_2, F@_3, F@_4,
-				    F@_5, F@_6, TrUserData)
-	  end
-    end;
-dg_read_field_def_acl_request(<<>>, 0, 0, F@_1, F@_2,
-			      F@_3, F@_4, F@_5, F@_6, _) ->
-    #{username => F@_1, client_id => F@_2,
-      ip_address => F@_3, protocol => F@_4,
-      mount_point => F@_5, topic => F@_6}.
-
-d_field_acl_request_username(<<1:1, X:7, Rest/binary>>,
-			     N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			     TrUserData)
-    when N < 57 ->
-    d_field_acl_request_username(Rest, N + 7, X bsl N + Acc,
-				 F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				 TrUserData);
-d_field_acl_request_username(<<0:1, X:7, Rest/binary>>,
-			     N, Acc, _, F@_2, F@_3, F@_4, F@_5, F@_6,
-			     TrUserData) ->
-    {NewFValue, RestF} = begin
-			   Len = X bsl N + Acc,
-			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
-			   {id(binary:copy(Bytes), TrUserData), Rest2}
-			 end,
-    dfp_read_field_def_acl_request(RestF, 0, 0, NewFValue,
-				   F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData).
-
-d_field_acl_request_client_id(<<1:1, X:7, Rest/binary>>,
-			      N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			      TrUserData)
-    when N < 57 ->
-    d_field_acl_request_client_id(Rest, N + 7,
-				  X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				  F@_6, TrUserData);
-d_field_acl_request_client_id(<<0:1, X:7, Rest/binary>>,
-			      N, Acc, F@_1, _, F@_3, F@_4, F@_5, F@_6,
-			      TrUserData) ->
-    {NewFValue, RestF} = begin
-			   Len = X bsl N + Acc,
-			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
-			   {id(binary:copy(Bytes), TrUserData), Rest2}
-			 end,
-    dfp_read_field_def_acl_request(RestF, 0, 0, F@_1,
-				   NewFValue, F@_3, F@_4, F@_5, F@_6,
-				   TrUserData).
-
-d_field_acl_request_ip_address(<<1:1, X:7,
-				 Rest/binary>>,
-			       N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			       TrUserData)
-    when N < 57 ->
-    d_field_acl_request_ip_address(Rest, N + 7,
-				   X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				   F@_6, TrUserData);
-d_field_acl_request_ip_address(<<0:1, X:7,
-				 Rest/binary>>,
-			       N, Acc, F@_1, F@_2, _, F@_4, F@_5, F@_6,
-			       TrUserData) ->
-    {NewFValue, RestF} = begin
-			   Len = X bsl N + Acc,
-			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
-			   {id(binary:copy(Bytes), TrUserData), Rest2}
-			 end,
-    dfp_read_field_def_acl_request(RestF, 0, 0, F@_1, F@_2,
-				   NewFValue, F@_4, F@_5, F@_6, TrUserData).
-
-d_field_acl_request_protocol(<<1:1, X:7, Rest/binary>>,
-			     N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-			     TrUserData)
-    when N < 57 ->
-    d_field_acl_request_protocol(Rest, N + 7, X bsl N + Acc,
-				 F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				 TrUserData);
-d_field_acl_request_protocol(<<0:1, X:7, Rest/binary>>,
-			     N, Acc, F@_1, F@_2, F@_3, _, F@_5, F@_6,
-			     TrUserData) ->
-    {NewFValue, RestF} = begin
-			   Len = X bsl N + Acc,
-			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
-			   {id(binary:copy(Bytes), TrUserData), Rest2}
-			 end,
-    dfp_read_field_def_acl_request(RestF, 0, 0, F@_1, F@_2,
-				   F@_3, NewFValue, F@_5, F@_6, TrUserData).
-
-d_field_acl_request_mount_point(<<1:1, X:7,
-				  Rest/binary>>,
-				N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				TrUserData)
-    when N < 57 ->
-    d_field_acl_request_mount_point(Rest, N + 7,
-				    X bsl N + Acc, F@_1, F@_2, F@_3, F@_4, F@_5,
-				    F@_6, TrUserData);
-d_field_acl_request_mount_point(<<0:1, X:7,
-				  Rest/binary>>,
-				N, Acc, F@_1, F@_2, F@_3, F@_4, _, F@_6,
-				TrUserData) ->
-    {NewFValue, RestF} = begin
-			   Len = X bsl N + Acc,
-			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
-			   {id(binary:copy(Bytes), TrUserData), Rest2}
-			 end,
-    dfp_read_field_def_acl_request(RestF, 0, 0, F@_1, F@_2,
-				   F@_3, F@_4, NewFValue, F@_6, TrUserData).
-
-d_field_acl_request_topic(<<1:1, X:7, Rest/binary>>, N,
-			  Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData)
-    when N < 57 ->
-    d_field_acl_request_topic(Rest, N + 7, X bsl N + Acc,
-			      F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData);
-d_field_acl_request_topic(<<0:1, X:7, Rest/binary>>, N,
-			  Acc, F@_1, F@_2, F@_3, F@_4, F@_5, _, TrUserData) ->
-    {NewFValue, RestF} = begin
-			   Len = X bsl N + Acc,
-			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
-			   {id(binary:copy(Bytes), TrUserData), Rest2}
-			 end,
-    dfp_read_field_def_acl_request(RestF, 0, 0, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, NewFValue, TrUserData).
-
-skip_varint_acl_request(<<1:1, _:7, Rest/binary>>, Z1,
-			Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData) ->
-    skip_varint_acl_request(Rest, Z1, Z2, F@_1, F@_2, F@_3,
-			    F@_4, F@_5, F@_6, TrUserData);
-skip_varint_acl_request(<<0:1, _:7, Rest/binary>>, Z1,
-			Z2, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData) ->
-    dfp_read_field_def_acl_request(Rest, Z1, Z2, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, F@_6, TrUserData).
-
-skip_length_delimited_acl_request(<<1:1, X:7,
-				    Rest/binary>>,
-				  N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				  TrUserData)
-    when N < 57 ->
-    skip_length_delimited_acl_request(Rest, N + 7,
-				      X bsl N + Acc, F@_1, F@_2, F@_3, F@_4,
-				      F@_5, F@_6, TrUserData);
-skip_length_delimited_acl_request(<<0:1, X:7,
-				    Rest/binary>>,
-				  N, Acc, F@_1, F@_2, F@_3, F@_4, F@_5, F@_6,
-				  TrUserData) ->
-    Length = X bsl N + Acc,
-    <<_:Length/binary, Rest2/binary>> = Rest,
-    dfp_read_field_def_acl_request(Rest2, 0, 0, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, F@_6, TrUserData).
-
-skip_group_acl_request(Bin, FNum, Z2, F@_1, F@_2, F@_3,
-		       F@_4, F@_5, F@_6, TrUserData) ->
-    {_, Rest} = read_group(Bin, FNum),
-    dfp_read_field_def_acl_request(Rest, 0, Z2, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, F@_6, TrUserData).
-
-skip_32_acl_request(<<_:32, Rest/binary>>, Z1, Z2, F@_1,
-		    F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData) ->
-    dfp_read_field_def_acl_request(Rest, Z1, Z2, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, F@_6, TrUserData).
-
-skip_64_acl_request(<<_:64, Rest/binary>>, Z1, Z2, F@_1,
-		    F@_2, F@_3, F@_4, F@_5, F@_6, TrUserData) ->
-    dfp_read_field_def_acl_request(Rest, Z1, Z2, F@_1, F@_2,
-				   F@_3, F@_4, F@_5, F@_6, TrUserData).
-
-decode_msg_acl_response(Bin, TrUserData) ->
-    dfp_read_field_def_acl_response(Bin, 0, 0,
-				    id(0, TrUserData), id(<<>>, TrUserData),
-				    TrUserData).
-
-dfp_read_field_def_acl_response(<<8, Rest/binary>>, Z1,
-				Z2, F@_1, F@_2, TrUserData) ->
-    d_field_acl_response_code(Rest, Z1, Z2, F@_1, F@_2,
-			      TrUserData);
-dfp_read_field_def_acl_response(<<18, Rest/binary>>, Z1,
-				Z2, F@_1, F@_2, TrUserData) ->
-    d_field_acl_response_msg(Rest, Z1, Z2, F@_1, F@_2,
-			     TrUserData);
-dfp_read_field_def_acl_response(<<>>, 0, 0, F@_1, F@_2,
-				_) ->
-    #{code => F@_1, msg => F@_2};
-dfp_read_field_def_acl_response(Other, Z1, Z2, F@_1,
-				F@_2, TrUserData) ->
-    dg_read_field_def_acl_response(Other, Z1, Z2, F@_1,
-				   F@_2, TrUserData).
-
-dg_read_field_def_acl_response(<<1:1, X:7,
-				 Rest/binary>>,
-			       N, Acc, F@_1, F@_2, TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_acl_response(Rest, N + 7,
-				   X bsl N + Acc, F@_1, F@_2, TrUserData);
-dg_read_field_def_acl_response(<<0:1, X:7,
-				 Rest/binary>>,
-			       N, Acc, F@_1, F@_2, TrUserData) ->
-    Key = X bsl N + Acc,
-    case Key of
-      8 ->
-	  d_field_acl_response_code(Rest, 0, 0, F@_1, F@_2,
-				    TrUserData);
-      18 ->
-	  d_field_acl_response_msg(Rest, 0, 0, F@_1, F@_2,
-				   TrUserData);
-      _ ->
-	  case Key band 7 of
-	    0 ->
-		skip_varint_acl_response(Rest, 0, 0, F@_1, F@_2,
-					 TrUserData);
-	    1 ->
-		skip_64_acl_response(Rest, 0, 0, F@_1, F@_2,
-				     TrUserData);
-	    2 ->
-		skip_length_delimited_acl_response(Rest, 0, 0, F@_1,
-						   F@_2, TrUserData);
-	    3 ->
-		skip_group_acl_response(Rest, Key bsr 3, 0, F@_1, F@_2,
-					TrUserData);
-	    5 ->
-		skip_32_acl_response(Rest, 0, 0, F@_1, F@_2, TrUserData)
-	  end
-    end;
-dg_read_field_def_acl_response(<<>>, 0, 0, F@_1, F@_2,
-			       _) ->
-    #{code => F@_1, msg => F@_2}.
-
-d_field_acl_response_code(<<1:1, X:7, Rest/binary>>, N,
-			  Acc, F@_1, F@_2, TrUserData)
-    when N < 57 ->
-    d_field_acl_response_code(Rest, N + 7, X bsl N + Acc,
-			      F@_1, F@_2, TrUserData);
-d_field_acl_response_code(<<0:1, X:7, Rest/binary>>, N,
-			  Acc, _, F@_2, TrUserData) ->
-    {NewFValue, RestF} = {begin
-			    <<Res:32/signed-native>> = <<(X bsl N +
-							    Acc):32/unsigned-native>>,
-			    id(Res, TrUserData)
-			  end,
-			  Rest},
-    dfp_read_field_def_acl_response(RestF, 0, 0, NewFValue,
-				    F@_2, TrUserData).
-
-d_field_acl_response_msg(<<1:1, X:7, Rest/binary>>, N,
-			 Acc, F@_1, F@_2, TrUserData)
-    when N < 57 ->
-    d_field_acl_response_msg(Rest, N + 7, X bsl N + Acc,
-			     F@_1, F@_2, TrUserData);
-d_field_acl_response_msg(<<0:1, X:7, Rest/binary>>, N,
-			 Acc, F@_1, _, TrUserData) ->
-    {NewFValue, RestF} = begin
-			   Len = X bsl N + Acc,
-			   <<Bytes:Len/binary, Rest2/binary>> = Rest,
-			   {id(binary:copy(Bytes), TrUserData), Rest2}
-			 end,
-    dfp_read_field_def_acl_response(RestF, 0, 0, F@_1,
-				    NewFValue, TrUserData).
-
-skip_varint_acl_response(<<1:1, _:7, Rest/binary>>, Z1,
-			 Z2, F@_1, F@_2, TrUserData) ->
-    skip_varint_acl_response(Rest, Z1, Z2, F@_1, F@_2,
-			     TrUserData);
-skip_varint_acl_response(<<0:1, _:7, Rest/binary>>, Z1,
-			 Z2, F@_1, F@_2, TrUserData) ->
-    dfp_read_field_def_acl_response(Rest, Z1, Z2, F@_1,
-				    F@_2, TrUserData).
-
-skip_length_delimited_acl_response(<<1:1, X:7,
-				     Rest/binary>>,
-				   N, Acc, F@_1, F@_2, TrUserData)
-    when N < 57 ->
-    skip_length_delimited_acl_response(Rest, N + 7,
-				       X bsl N + Acc, F@_1, F@_2, TrUserData);
-skip_length_delimited_acl_response(<<0:1, X:7,
-				     Rest/binary>>,
-				   N, Acc, F@_1, F@_2, TrUserData) ->
-    Length = X bsl N + Acc,
-    <<_:Length/binary, Rest2/binary>> = Rest,
-    dfp_read_field_def_acl_response(Rest2, 0, 0, F@_1, F@_2,
-				    TrUserData).
-
-skip_group_acl_response(Bin, FNum, Z2, F@_1, F@_2,
-			TrUserData) ->
-    {_, Rest} = read_group(Bin, FNum),
-    dfp_read_field_def_acl_response(Rest, 0, Z2, F@_1, F@_2,
-				    TrUserData).
-
-skip_32_acl_response(<<_:32, Rest/binary>>, Z1, Z2,
-		     F@_1, F@_2, TrUserData) ->
-    dfp_read_field_def_acl_response(Rest, Z1, Z2, F@_1,
-				    F@_2, TrUserData).
-
-skip_64_acl_response(<<_:64, Rest/binary>>, Z1, Z2,
-		     F@_1, F@_2, TrUserData) ->
-    dfp_read_field_def_acl_response(Rest, Z1, Z2, F@_1,
-				    F@_2, TrUserData).
+				     F@_2, F@_3, F@_4, F@_5, TrUserData).
 
 read_group(Bin, FieldNum) ->
     {NumBytes, EndTagLen} = read_gr_b(Bin, 0, 0, 0, 0, FieldNum),
@@ -1375,35 +1472,31 @@ merge_msgs(Prev, New, MsgName, Opts) ->
       auth_request ->
 	  merge_msg_auth_request(Prev, New, TrUserData);
       auth_response ->
-	  merge_msg_auth_response(Prev, New, TrUserData);
-      acl_request ->
-	  merge_msg_acl_request(Prev, New, TrUserData);
-      acl_response ->
-	  merge_msg_acl_response(Prev, New, TrUserData)
+	  merge_msg_auth_response(Prev, New, TrUserData)
     end.
 
 -compile({nowarn_unused_function,merge_msg_auth_request/3}).
 merge_msg_auth_request(PMsg, NMsg, _) ->
     S1 = #{},
     S2 = case {PMsg, NMsg} of
-	   {_, #{username := NFusername}} ->
-	       S1#{username => NFusername};
-	   {#{username := PFusername}, _} ->
-	       S1#{username => PFusername};
+	   {_, #{client_id := NFclient_id}} ->
+	       S1#{client_id => NFclient_id};
+	   {#{client_id := PFclient_id}, _} ->
+	       S1#{client_id => PFclient_id};
 	   _ -> S1
 	 end,
     S3 = case {PMsg, NMsg} of
-	   {_, #{client_id := NFclient_id}} ->
-	       S2#{client_id => NFclient_id};
-	   {#{client_id := PFclient_id}, _} ->
-	       S2#{client_id => PFclient_id};
+	   {_, #{username := NFusername}} ->
+	       S2#{username => NFusername};
+	   {#{username := PFusername}, _} ->
+	       S2#{username => PFusername};
 	   _ -> S2
 	 end,
     S4 = case {PMsg, NMsg} of
-	   {_, #{ip_address := NFip_address}} ->
-	       S3#{ip_address => NFip_address};
-	   {#{ip_address := PFip_address}, _} ->
-	       S3#{ip_address => PFip_address};
+	   {_, #{password := NFpassword}} ->
+	       S3#{password => NFpassword};
+	   {#{password := PFpassword}, _} ->
+	       S3#{password => PFpassword};
 	   _ -> S3
 	 end,
     S5 = case {PMsg, NMsg} of
@@ -1414,23 +1507,75 @@ merge_msg_auth_request(PMsg, NMsg, _) ->
 	   _ -> S4
 	 end,
     S6 = case {PMsg, NMsg} of
-	   {_, #{port := NFport}} -> S5#{port => NFport};
-	   {#{port := PFport}, _} -> S5#{port => PFport};
+	   {_, #{peerhost := NFpeerhost}} ->
+	       S5#{peerhost => NFpeerhost};
+	   {#{peerhost := PFpeerhost}, _} ->
+	       S5#{peerhost => PFpeerhost};
 	   _ -> S5
 	 end,
     S7 = case {PMsg, NMsg} of
-	   {_, #{tls_common_name := NFtls_common_name}} ->
-	       S6#{tls_common_name => NFtls_common_name};
-	   {#{tls_common_name := PFtls_common_name}, _} ->
-	       S6#{tls_common_name => PFtls_common_name};
+	   {_, #{sockport := NFsockport}} ->
+	       S6#{sockport => NFsockport};
+	   {#{sockport := PFsockport}, _} ->
+	       S6#{sockport => PFsockport};
 	   _ -> S6
 	 end,
+    S8 = case {PMsg, NMsg} of
+	   {_, #{peercert := NFpeercert}} ->
+	       S7#{peercert => NFpeercert};
+	   {#{peercert := PFpeercert}, _} ->
+	       S7#{peercert => PFpeercert};
+	   _ -> S7
+	 end,
+    S9 = case {PMsg, NMsg} of
+	   {_, #{is_bridge := NFis_bridge}} ->
+	       S8#{is_bridge => NFis_bridge};
+	   {#{is_bridge := PFis_bridge}, _} ->
+	       S8#{is_bridge => PFis_bridge};
+	   _ -> S8
+	 end,
+    S10 = case {PMsg, NMsg} of
+	    {_, #{is_superuser := NFis_superuser}} ->
+		S9#{is_superuser => NFis_superuser};
+	    {#{is_superuser := PFis_superuser}, _} ->
+		S9#{is_superuser => PFis_superuser};
+	    _ -> S9
+	  end,
+    S11 = case {PMsg, NMsg} of
+	    {_, #{mountpoint := NFmountpoint}} ->
+		S10#{mountpoint => NFmountpoint};
+	    {#{mountpoint := PFmountpoint}, _} ->
+		S10#{mountpoint => PFmountpoint};
+	    _ -> S10
+	  end,
+    S12 = case {PMsg, NMsg} of
+	    {_, #{zone := NFzone}} -> S11#{zone => NFzone};
+	    {#{zone := PFzone}, _} -> S11#{zone => PFzone};
+	    _ -> S11
+	  end,
+    S13 = case {PMsg, NMsg} of
+	    {_, #{tls_common_name := NFtls_common_name}} ->
+		S12#{tls_common_name => NFtls_common_name};
+	    {#{tls_common_name := PFtls_common_name}, _} ->
+		S12#{tls_common_name => PFtls_common_name};
+	    _ -> S12
+	  end,
+    S14 = case {PMsg, NMsg} of
+	    {_, #{tls_subject := NFtls_subject}} ->
+		S13#{tls_subject => NFtls_subject};
+	    {#{tls_subject := PFtls_subject}, _} ->
+		S13#{tls_subject => PFtls_subject};
+	    _ -> S13
+	  end,
+    S15 = case {PMsg, NMsg} of
+	    {_, #{topic := NFtopic}} -> S14#{topic => NFtopic};
+	    {#{topic := PFtopic}, _} -> S14#{topic => PFtopic};
+	    _ -> S14
+	  end,
     case {PMsg, NMsg} of
-      {_, #{tls_subject := NFtls_subject}} ->
-	  S7#{tls_subject => NFtls_subject};
-      {#{tls_subject := PFtls_subject}, _} ->
-	  S7#{tls_subject => PFtls_subject};
-      _ -> S7
+      {_, #{access := NFaccess}} -> S15#{access => NFaccess};
+      {#{access := PFaccess}, _} -> S15#{access => PFaccess};
+      _ -> S15
     end.
 
 -compile({nowarn_unused_function,merge_msg_auth_response/3}).
@@ -1441,68 +1586,31 @@ merge_msg_auth_response(PMsg, NMsg, _) ->
 	   {#{code := PFcode}, _} -> S1#{code => PFcode};
 	   _ -> S1
 	 end,
-    case {PMsg, NMsg} of
-      {_, #{msg := NFmsg}} -> S2#{msg => NFmsg};
-      {#{msg := PFmsg}, _} -> S2#{msg => PFmsg};
-      _ -> S2
-    end.
-
--compile({nowarn_unused_function,merge_msg_acl_request/3}).
-merge_msg_acl_request(PMsg, NMsg, _) ->
-    S1 = #{},
-    S2 = case {PMsg, NMsg} of
-	   {_, #{username := NFusername}} ->
-	       S1#{username => NFusername};
-	   {#{username := PFusername}, _} ->
-	       S1#{username => PFusername};
-	   _ -> S1
-	 end,
     S3 = case {PMsg, NMsg} of
-	   {_, #{client_id := NFclient_id}} ->
-	       S2#{client_id => NFclient_id};
-	   {#{client_id := PFclient_id}, _} ->
-	       S2#{client_id => PFclient_id};
+	   {_, #{msg := NFmsg}} -> S2#{msg => NFmsg};
+	   {#{msg := PFmsg}, _} -> S2#{msg => PFmsg};
 	   _ -> S2
 	 end,
     S4 = case {PMsg, NMsg} of
-	   {_, #{ip_address := NFip_address}} ->
-	       S3#{ip_address => NFip_address};
-	   {#{ip_address := PFip_address}, _} ->
-	       S3#{ip_address => PFip_address};
+	   {_, #{is_superuser := NFis_superuser}} ->
+	       S3#{is_superuser => NFis_superuser};
+	   {#{is_superuser := PFis_superuser}, _} ->
+	       S3#{is_superuser => PFis_superuser};
 	   _ -> S3
 	 end,
     S5 = case {PMsg, NMsg} of
-	   {_, #{protocol := NFprotocol}} ->
-	       S4#{protocol => NFprotocol};
-	   {#{protocol := PFprotocol}, _} ->
-	       S4#{protocol => PFprotocol};
+	   {_, #{anonymous := NFanonymous}} ->
+	       S4#{anonymous => NFanonymous};
+	   {#{anonymous := PFanonymous}, _} ->
+	       S4#{anonymous => PFanonymous};
 	   _ -> S4
 	 end,
-    S6 = case {PMsg, NMsg} of
-	   {_, #{mount_point := NFmount_point}} ->
-	       S5#{mount_point => NFmount_point};
-	   {#{mount_point := PFmount_point}, _} ->
-	       S5#{mount_point => PFmount_point};
-	   _ -> S5
-	 end,
     case {PMsg, NMsg} of
-      {_, #{topic := NFtopic}} -> S6#{topic => NFtopic};
-      {#{topic := PFtopic}, _} -> S6#{topic => PFtopic};
-      _ -> S6
-    end.
-
--compile({nowarn_unused_function,merge_msg_acl_response/3}).
-merge_msg_acl_response(PMsg, NMsg, _) ->
-    S1 = #{},
-    S2 = case {PMsg, NMsg} of
-	   {_, #{code := NFcode}} -> S1#{code => NFcode};
-	   {#{code := PFcode}, _} -> S1#{code => PFcode};
-	   _ -> S1
-	 end,
-    case {PMsg, NMsg} of
-      {_, #{msg := NFmsg}} -> S2#{msg => NFmsg};
-      {#{msg := PFmsg}, _} -> S2#{msg => PFmsg};
-      _ -> S2
+      {_, #{mountpoint := NFmountpoint}} ->
+	  S5#{mountpoint => NFmountpoint};
+      {#{mountpoint := PFmountpoint}, _} ->
+	  S5#{mountpoint => PFmountpoint};
+      _ -> S5
     end.
 
 
@@ -1516,10 +1624,6 @@ verify_msg(Msg, MsgName, Opts) ->
 	  v_msg_auth_request(Msg, [MsgName], TrUserData);
       auth_response ->
 	  v_msg_auth_response(Msg, [MsgName], TrUserData);
-      acl_request ->
-	  v_msg_acl_request(Msg, [MsgName], TrUserData);
-      acl_response ->
-	  v_msg_acl_response(Msg, [MsgName], TrUserData);
       _ -> mk_type_error(not_a_known_message, Msg, [])
     end.
 
@@ -1528,18 +1632,18 @@ verify_msg(Msg, MsgName, Opts) ->
 -dialyzer({nowarn_function,v_msg_auth_request/3}).
 v_msg_auth_request(#{} = M, Path, TrUserData) ->
     case M of
-      #{username := F1} ->
-	  v_type_string(F1, [username | Path], TrUserData);
+      #{client_id := F1} ->
+	  v_type_string(F1, [client_id | Path], TrUserData);
       _ -> ok
     end,
     case M of
-      #{client_id := F2} ->
-	  v_type_string(F2, [client_id | Path], TrUserData);
+      #{username := F2} ->
+	  v_type_string(F2, [username | Path], TrUserData);
       _ -> ok
     end,
     case M of
-      #{ip_address := F3} ->
-	  v_type_string(F3, [ip_address | Path], TrUserData);
+      #{password := F3} ->
+	  v_type_string(F3, [password | Path], TrUserData);
       _ -> ok
     end,
     case M of
@@ -1548,27 +1652,76 @@ v_msg_auth_request(#{} = M, Path, TrUserData) ->
       _ -> ok
     end,
     case M of
-      #{port := F5} ->
-	  v_type_int32(F5, [port | Path], TrUserData);
+      #{peerhost := F5} ->
+	  v_type_string(F5, [peerhost | Path], TrUserData);
       _ -> ok
     end,
     case M of
-      #{tls_common_name := F6} ->
-	  v_type_string(F6, [tls_common_name | Path], TrUserData);
+      #{sockport := F6} ->
+	  v_type_int32(F6, [sockport | Path], TrUserData);
       _ -> ok
     end,
     case M of
-      #{tls_subject := F7} ->
-	  v_type_string(F7, [tls_subject | Path], TrUserData);
+      #{peercert := F7} ->
+	  v_type_string(F7, [peercert | Path], TrUserData);
       _ -> ok
     end,
-    lists:foreach(fun (username) -> ok;
-		      (client_id) -> ok;
-		      (ip_address) -> ok;
+    case M of
+      #{is_bridge := F8} ->
+	  v_type_bool(F8, [is_bridge | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{is_superuser := F9} ->
+	  v_type_bool(F9, [is_superuser | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{mountpoint := F10} ->
+	  v_type_string(F10, [mountpoint | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{zone := F11} ->
+	  v_type_string(F11, [zone | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{tls_common_name := F12} ->
+	  v_type_string(F12, [tls_common_name | Path],
+			TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{tls_subject := F13} ->
+	  v_type_string(F13, [tls_subject | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{topic := F14} ->
+	  v_type_string(F14, [topic | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{access := F15} ->
+	  v_type_string(F15, [access | Path], TrUserData);
+      _ -> ok
+    end,
+    lists:foreach(fun (client_id) -> ok;
+		      (username) -> ok;
+		      (password) -> ok;
 		      (protocol) -> ok;
-		      (port) -> ok;
+		      (peerhost) -> ok;
+		      (sockport) -> ok;
+		      (peercert) -> ok;
+		      (is_bridge) -> ok;
+		      (is_superuser) -> ok;
+		      (mountpoint) -> ok;
+		      (zone) -> ok;
 		      (tls_common_name) -> ok;
 		      (tls_subject) -> ok;
+		      (topic) -> ok;
+		      (access) -> ok;
 		      (OtherKey) ->
 			  mk_type_error({extraneous_key, OtherKey}, M, Path)
 		  end,
@@ -1595,8 +1748,26 @@ v_msg_auth_response(#{} = M, Path, TrUserData) ->
 	  v_type_string(F2, [msg | Path], TrUserData);
       _ -> ok
     end,
+    case M of
+      #{is_superuser := F3} ->
+	  v_type_bool(F3, [is_superuser | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{anonymous := F4} ->
+	  v_type_bool(F4, [anonymous | Path], TrUserData);
+      _ -> ok
+    end,
+    case M of
+      #{mountpoint := F5} ->
+	  v_type_string(F5, [mountpoint | Path], TrUserData);
+      _ -> ok
+    end,
     lists:foreach(fun (code) -> ok;
 		      (msg) -> ok;
+		      (is_superuser) -> ok;
+		      (anonymous) -> ok;
+		      (mountpoint) -> ok;
 		      (OtherKey) ->
 			  mk_type_error({extraneous_key, OtherKey}, M, Path)
 		  end,
@@ -1610,86 +1781,6 @@ v_msg_auth_response(M, Path, _TrUserData)
 v_msg_auth_response(X, Path, _TrUserData) ->
     mk_type_error({expected_msg, auth_response}, X, Path).
 
--compile({nowarn_unused_function,v_msg_acl_request/3}).
--dialyzer({nowarn_function,v_msg_acl_request/3}).
-v_msg_acl_request(#{} = M, Path, TrUserData) ->
-    case M of
-      #{username := F1} ->
-	  v_type_string(F1, [username | Path], TrUserData);
-      _ -> ok
-    end,
-    case M of
-      #{client_id := F2} ->
-	  v_type_string(F2, [client_id | Path], TrUserData);
-      _ -> ok
-    end,
-    case M of
-      #{ip_address := F3} ->
-	  v_type_string(F3, [ip_address | Path], TrUserData);
-      _ -> ok
-    end,
-    case M of
-      #{protocol := F4} ->
-	  v_type_string(F4, [protocol | Path], TrUserData);
-      _ -> ok
-    end,
-    case M of
-      #{mount_point := F5} ->
-	  v_type_string(F5, [mount_point | Path], TrUserData);
-      _ -> ok
-    end,
-    case M of
-      #{topic := F6} ->
-	  v_type_string(F6, [topic | Path], TrUserData);
-      _ -> ok
-    end,
-    lists:foreach(fun (username) -> ok;
-		      (client_id) -> ok;
-		      (ip_address) -> ok;
-		      (protocol) -> ok;
-		      (mount_point) -> ok;
-		      (topic) -> ok;
-		      (OtherKey) ->
-			  mk_type_error({extraneous_key, OtherKey}, M, Path)
-		  end,
-		  maps:keys(M)),
-    ok;
-v_msg_acl_request(M, Path, _TrUserData)
-    when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M),
-		   acl_request},
-		  M, Path);
-v_msg_acl_request(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, acl_request}, X, Path).
-
--compile({nowarn_unused_function,v_msg_acl_response/3}).
--dialyzer({nowarn_function,v_msg_acl_response/3}).
-v_msg_acl_response(#{} = M, Path, TrUserData) ->
-    case M of
-      #{code := F1} ->
-	  v_type_int32(F1, [code | Path], TrUserData);
-      _ -> ok
-    end,
-    case M of
-      #{msg := F2} ->
-	  v_type_string(F2, [msg | Path], TrUserData);
-      _ -> ok
-    end,
-    lists:foreach(fun (code) -> ok;
-		      (msg) -> ok;
-		      (OtherKey) ->
-			  mk_type_error({extraneous_key, OtherKey}, M, Path)
-		  end,
-		  maps:keys(M)),
-    ok;
-v_msg_acl_response(M, Path, _TrUserData)
-    when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M),
-		   acl_response},
-		  M, Path);
-v_msg_acl_response(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, acl_response}, X, Path).
-
 -compile({nowarn_unused_function,v_type_int32/3}).
 -dialyzer({nowarn_function,v_type_int32/3}).
 v_type_int32(N, _Path, _TrUserData)
@@ -1701,6 +1792,15 @@ v_type_int32(N, Path, _TrUserData) when is_integer(N) ->
 v_type_int32(X, Path, _TrUserData) ->
     mk_type_error({bad_integer, int32, signed, 32}, X,
 		  Path).
+
+-compile({nowarn_unused_function,v_type_bool/3}).
+-dialyzer({nowarn_function,v_type_bool/3}).
+v_type_bool(false, _Path, _TrUserData) -> ok;
+v_type_bool(true, _Path, _TrUserData) -> ok;
+v_type_bool(0, _Path, _TrUserData) -> ok;
+v_type_bool(1, _Path, _TrUserData) -> ok;
+v_type_bool(X, Path, _TrUserData) ->
+    mk_type_error(bad_boolean_value, X, Path).
 
 -compile({nowarn_unused_function,v_type_string/3}).
 -dialyzer({nowarn_function,v_type_string/3}).
@@ -1759,56 +1859,57 @@ cons(Elem, Acc, _TrUserData) -> [Elem | Acc].
 
 get_msg_defs() ->
     [{{msg, auth_request},
-      [#{name => username, fnum => 1, rnum => 2,
+      [#{name => client_id, fnum => 1, rnum => 2,
 	 type => string, occurrence => optional, opts => []},
-       #{name => client_id, fnum => 2, rnum => 3,
+       #{name => username, fnum => 2, rnum => 3,
 	 type => string, occurrence => optional, opts => []},
-       #{name => ip_address, fnum => 3, rnum => 4,
+       #{name => password, fnum => 3, rnum => 4,
 	 type => string, occurrence => optional, opts => []},
        #{name => protocol, fnum => 4, rnum => 5,
 	 type => string, occurrence => optional, opts => []},
-       #{name => port, fnum => 5, rnum => 6, type => int32,
-	 occurrence => optional, opts => []},
-       #{name => tls_common_name, fnum => 6, rnum => 7,
+       #{name => peerhost, fnum => 5, rnum => 6,
 	 type => string, occurrence => optional, opts => []},
-       #{name => tls_subject, fnum => 7, rnum => 8,
+       #{name => sockport, fnum => 6, rnum => 7, type => int32,
+	 occurrence => optional, opts => []},
+       #{name => peercert, fnum => 7, rnum => 8,
+	 type => string, occurrence => optional, opts => []},
+       #{name => is_bridge, fnum => 8, rnum => 9, type => bool,
+	 occurrence => optional, opts => []},
+       #{name => is_superuser, fnum => 9, rnum => 10,
+	 type => bool, occurrence => optional, opts => []},
+       #{name => mountpoint, fnum => 10, rnum => 11,
+	 type => string, occurrence => optional, opts => []},
+       #{name => zone, fnum => 11, rnum => 12, type => string,
+	 occurrence => optional, opts => []},
+       #{name => tls_common_name, fnum => 12, rnum => 13,
+	 type => string, occurrence => optional, opts => []},
+       #{name => tls_subject, fnum => 13, rnum => 14,
+	 type => string, occurrence => optional, opts => []},
+       #{name => topic, fnum => 14, rnum => 15, type => string,
+	 occurrence => optional, opts => []},
+       #{name => access, fnum => 15, rnum => 16,
 	 type => string, occurrence => optional, opts => []}]},
      {{msg, auth_response},
       [#{name => code, fnum => 1, rnum => 2, type => int32,
 	 occurrence => optional, opts => []},
        #{name => msg, fnum => 2, rnum => 3, type => string,
-	 occurrence => optional, opts => []}]},
-     {{msg, acl_request},
-      [#{name => username, fnum => 1, rnum => 2,
-	 type => string, occurrence => optional, opts => []},
-       #{name => client_id, fnum => 2, rnum => 3,
-	 type => string, occurrence => optional, opts => []},
-       #{name => ip_address, fnum => 3, rnum => 4,
-	 type => string, occurrence => optional, opts => []},
-       #{name => protocol, fnum => 4, rnum => 5,
-	 type => string, occurrence => optional, opts => []},
-       #{name => mount_point, fnum => 5, rnum => 6,
-	 type => string, occurrence => optional, opts => []},
-       #{name => topic, fnum => 6, rnum => 7, type => string,
-	 occurrence => optional, opts => []}]},
-     {{msg, acl_response},
-      [#{name => code, fnum => 1, rnum => 2, type => int32,
 	 occurrence => optional, opts => []},
-       #{name => msg, fnum => 2, rnum => 3, type => string,
-	 occurrence => optional, opts => []}]}].
+       #{name => is_superuser, fnum => 3, rnum => 4,
+	 type => bool, occurrence => optional, opts => []},
+       #{name => anonymous, fnum => 4, rnum => 5, type => bool,
+	 occurrence => optional, opts => []},
+       #{name => mountpoint, fnum => 6, rnum => 6,
+	 type => string, occurrence => optional, opts => []}]}].
 
 
-get_msg_names() ->
-    [auth_request, auth_response, acl_request,
-     acl_response].
+get_msg_names() -> [auth_request, auth_response].
 
 
 get_group_names() -> [].
 
 
 get_msg_or_group_names() ->
-    [auth_request, auth_response, acl_request,
-     acl_response].
+    [auth_request, auth_response].
 
 
 get_enum_names() -> [].
@@ -1827,43 +1928,47 @@ fetch_enum_def(EnumName) ->
 
 
 find_msg_def(auth_request) ->
-    [#{name => username, fnum => 1, rnum => 2,
+    [#{name => client_id, fnum => 1, rnum => 2,
        type => string, occurrence => optional, opts => []},
-     #{name => client_id, fnum => 2, rnum => 3,
+     #{name => username, fnum => 2, rnum => 3,
        type => string, occurrence => optional, opts => []},
-     #{name => ip_address, fnum => 3, rnum => 4,
+     #{name => password, fnum => 3, rnum => 4,
        type => string, occurrence => optional, opts => []},
      #{name => protocol, fnum => 4, rnum => 5,
        type => string, occurrence => optional, opts => []},
-     #{name => port, fnum => 5, rnum => 6, type => int32,
-       occurrence => optional, opts => []},
-     #{name => tls_common_name, fnum => 6, rnum => 7,
+     #{name => peerhost, fnum => 5, rnum => 6,
        type => string, occurrence => optional, opts => []},
-     #{name => tls_subject, fnum => 7, rnum => 8,
+     #{name => sockport, fnum => 6, rnum => 7, type => int32,
+       occurrence => optional, opts => []},
+     #{name => peercert, fnum => 7, rnum => 8,
+       type => string, occurrence => optional, opts => []},
+     #{name => is_bridge, fnum => 8, rnum => 9, type => bool,
+       occurrence => optional, opts => []},
+     #{name => is_superuser, fnum => 9, rnum => 10,
+       type => bool, occurrence => optional, opts => []},
+     #{name => mountpoint, fnum => 10, rnum => 11,
+       type => string, occurrence => optional, opts => []},
+     #{name => zone, fnum => 11, rnum => 12, type => string,
+       occurrence => optional, opts => []},
+     #{name => tls_common_name, fnum => 12, rnum => 13,
+       type => string, occurrence => optional, opts => []},
+     #{name => tls_subject, fnum => 13, rnum => 14,
+       type => string, occurrence => optional, opts => []},
+     #{name => topic, fnum => 14, rnum => 15, type => string,
+       occurrence => optional, opts => []},
+     #{name => access, fnum => 15, rnum => 16,
        type => string, occurrence => optional, opts => []}];
 find_msg_def(auth_response) ->
     [#{name => code, fnum => 1, rnum => 2, type => int32,
        occurrence => optional, opts => []},
      #{name => msg, fnum => 2, rnum => 3, type => string,
-       occurrence => optional, opts => []}];
-find_msg_def(acl_request) ->
-    [#{name => username, fnum => 1, rnum => 2,
-       type => string, occurrence => optional, opts => []},
-     #{name => client_id, fnum => 2, rnum => 3,
-       type => string, occurrence => optional, opts => []},
-     #{name => ip_address, fnum => 3, rnum => 4,
-       type => string, occurrence => optional, opts => []},
-     #{name => protocol, fnum => 4, rnum => 5,
-       type => string, occurrence => optional, opts => []},
-     #{name => mount_point, fnum => 5, rnum => 6,
-       type => string, occurrence => optional, opts => []},
-     #{name => topic, fnum => 6, rnum => 7, type => string,
-       occurrence => optional, opts => []}];
-find_msg_def(acl_response) ->
-    [#{name => code, fnum => 1, rnum => 2, type => int32,
        occurrence => optional, opts => []},
-     #{name => msg, fnum => 2, rnum => 3, type => string,
-       occurrence => optional, opts => []}];
+     #{name => is_superuser, fnum => 3, rnum => 4,
+       type => bool, occurrence => optional, opts => []},
+     #{name => anonymous, fnum => 4, rnum => 5, type => bool,
+       occurrence => optional, opts => []},
+     #{name => mountpoint, fnum => 6, rnum => 6,
+       type => string, occurrence => optional, opts => []}];
 find_msg_def(_) -> error.
 
 
@@ -1881,46 +1986,39 @@ enum_value_by_symbol(E, V) ->
 
 
 
-get_service_names() -> ['emqx_auth.Service'].
+get_service_names() -> ['emqx_auth.Authentication'].
 
 
-get_service_def('emqx_auth.Service') ->
-    {{service, 'emqx_auth.Service'},
+get_service_def('emqx_auth.Authentication') ->
+    {{service, 'emqx_auth.Authentication'},
      [#{name => 'AuthUser', input => auth_request,
 	output => auth_response, input_stream => false,
 	output_stream => false, opts => []},
-      #{name => 'IsSuper', input => auth_request,
+      #{name => 'AuthACL', input => auth_request,
 	output => auth_response, input_stream => false,
-	output_stream => false, opts => []},
-      #{name => 'AuthACL', input => acl_request,
-	output => acl_response, input_stream => false,
 	output_stream => false, opts => []}]};
 get_service_def(_) -> error.
 
 
-get_rpc_names('emqx_auth.Service') ->
-    ['AuthUser', 'IsSuper', 'AuthACL'];
+get_rpc_names('emqx_auth.Authentication') ->
+    ['AuthUser', 'AuthACL'];
 get_rpc_names(_) -> error.
 
 
-find_rpc_def('emqx_auth.Service', RpcName) ->
-    'find_rpc_def_emqx_auth.Service'(RpcName);
+find_rpc_def('emqx_auth.Authentication', RpcName) ->
+    'find_rpc_def_emqx_auth.Authentication'(RpcName);
 find_rpc_def(_, _) -> error.
 
 
-'find_rpc_def_emqx_auth.Service'('AuthUser') ->
+'find_rpc_def_emqx_auth.Authentication'('AuthUser') ->
     #{name => 'AuthUser', input => auth_request,
       output => auth_response, input_stream => false,
       output_stream => false, opts => []};
-'find_rpc_def_emqx_auth.Service'('IsSuper') ->
-    #{name => 'IsSuper', input => auth_request,
+'find_rpc_def_emqx_auth.Authentication'('AuthACL') ->
+    #{name => 'AuthACL', input => auth_request,
       output => auth_response, input_stream => false,
       output_stream => false, opts => []};
-'find_rpc_def_emqx_auth.Service'('AuthACL') ->
-    #{name => 'AuthACL', input => acl_request,
-      output => acl_response, input_stream => false,
-      output_stream => false, opts => []};
-'find_rpc_def_emqx_auth.Service'(_) -> error.
+'find_rpc_def_emqx_auth.Authentication'(_) -> error.
 
 
 fetch_rpc_def(ServiceName, RpcName) ->
@@ -1933,14 +2031,16 @@ fetch_rpc_def(ServiceName, RpcName) ->
 
 %% Convert a a fully qualified (ie with package name) service name
 %% as a binary to a service name as an atom.
-fqbin_to_service_name(<<"emqx_auth.Service">>) -> 'emqx_auth.Service';
+fqbin_to_service_name(<<"emqx_auth.Authentication">>) ->
+    'emqx_auth.Authentication';
 fqbin_to_service_name(X) ->
     error({gpb_error, {badservice, X}}).
 
 
 %% Convert a service name as an atom to a fully qualified
 %% (ie with package name) name as a binary.
-service_name_to_fqbin('emqx_auth.Service') -> <<"emqx_auth.Service">>;
+service_name_to_fqbin('emqx_auth.Authentication') ->
+    <<"emqx_auth.Authentication">>;
 service_name_to_fqbin(X) ->
     error({gpb_error, {badservice, X}}).
 
@@ -1948,12 +2048,10 @@ service_name_to_fqbin(X) ->
 %% Convert a a fully qualified (ie with package name) service name
 %% and an rpc name, both as binaries to a service name and an rpc
 %% name, as atoms.
-fqbins_to_service_and_rpc_name(<<"emqx_auth.Service">>, <<"AuthUser">>) ->
-    {'emqx_auth.Service', 'AuthUser'};
-fqbins_to_service_and_rpc_name(<<"emqx_auth.Service">>, <<"IsSuper">>) ->
-    {'emqx_auth.Service', 'IsSuper'};
-fqbins_to_service_and_rpc_name(<<"emqx_auth.Service">>, <<"AuthACL">>) ->
-    {'emqx_auth.Service', 'AuthACL'};
+fqbins_to_service_and_rpc_name(<<"emqx_auth.Authentication">>, <<"AuthUser">>) ->
+    {'emqx_auth.Authentication', 'AuthUser'};
+fqbins_to_service_and_rpc_name(<<"emqx_auth.Authentication">>, <<"AuthACL">>) ->
+    {'emqx_auth.Authentication', 'AuthACL'};
 fqbins_to_service_and_rpc_name(S, R) ->
     error({gpb_error, {badservice_or_rpc, {S, R}}}).
 
@@ -1961,30 +2059,23 @@ fqbins_to_service_and_rpc_name(S, R) ->
 %% Convert a service name and an rpc name, both as atoms,
 %% to a fully qualified (ie with package name) service name and
 %% an rpc name as binaries.
-service_and_rpc_name_to_fqbins('emqx_auth.Service',
+service_and_rpc_name_to_fqbins('emqx_auth.Authentication',
 			       'AuthUser') ->
-    {<<"emqx_auth.Service">>, <<"AuthUser">>};
-service_and_rpc_name_to_fqbins('emqx_auth.Service',
-			       'IsSuper') ->
-    {<<"emqx_auth.Service">>, <<"IsSuper">>};
-service_and_rpc_name_to_fqbins('emqx_auth.Service',
+    {<<"emqx_auth.Authentication">>, <<"AuthUser">>};
+service_and_rpc_name_to_fqbins('emqx_auth.Authentication',
 			       'AuthACL') ->
-    {<<"emqx_auth.Service">>, <<"AuthACL">>};
+    {<<"emqx_auth.Authentication">>, <<"AuthACL">>};
 service_and_rpc_name_to_fqbins(S, R) ->
     error({gpb_error, {badservice_or_rpc, {S, R}}}).
 
 
 fqbin_to_msg_name(<<"emqx_auth.AuthRequest">>) -> auth_request;
 fqbin_to_msg_name(<<"emqx_auth.AuthResponse">>) -> auth_response;
-fqbin_to_msg_name(<<"emqx_auth.ACLRequest">>) -> acl_request;
-fqbin_to_msg_name(<<"emqx_auth.ACLResponse">>) -> acl_response;
 fqbin_to_msg_name(E) -> error({gpb_error, {badmsg, E}}).
 
 
 msg_name_to_fqbin(auth_request) -> <<"emqx_auth.AuthRequest">>;
 msg_name_to_fqbin(auth_response) -> <<"emqx_auth.AuthResponse">>;
-msg_name_to_fqbin(acl_request) -> <<"emqx_auth.ACLRequest">>;
-msg_name_to_fqbin(acl_response) -> <<"emqx_auth.ACLResponse">>;
 msg_name_to_fqbin(E) -> error({gpb_error, {badmsg, E}}).
 
 
@@ -2026,8 +2117,7 @@ get_all_proto_names() -> ["auth"].
 
 
 get_msg_containment("auth") ->
-    [acl_request, acl_response, auth_request,
-     auth_response];
+    [auth_request, auth_response];
 get_msg_containment(P) ->
     error({gpb_error, {badproto, P}}).
 
@@ -2038,15 +2128,14 @@ get_pkg_containment(P) ->
 
 
 get_service_containment("auth") ->
-    ['emqx_auth.Service'];
+    ['emqx_auth.Authentication'];
 get_service_containment(P) ->
     error({gpb_error, {badproto, P}}).
 
 
 get_rpc_containment("auth") ->
-    [{'emqx_auth.Service', 'AuthUser'},
-     {'emqx_auth.Service', 'IsSuper'},
-     {'emqx_auth.Service', 'AuthACL'}];
+    [{'emqx_auth.Authentication', 'AuthUser'},
+     {'emqx_auth.Authentication', 'AuthACL'}];
 get_rpc_containment(P) ->
     error({gpb_error, {badproto, P}}).
 
@@ -2057,14 +2146,12 @@ get_enum_containment(P) ->
 
 
 get_proto_by_msg_name_as_fqbin(<<"emqx_auth.AuthRequest">>) -> "auth";
-get_proto_by_msg_name_as_fqbin(<<"emqx_auth.ACLRequest">>) -> "auth";
 get_proto_by_msg_name_as_fqbin(<<"emqx_auth.AuthResponse">>) -> "auth";
-get_proto_by_msg_name_as_fqbin(<<"emqx_auth.ACLResponse">>) -> "auth";
 get_proto_by_msg_name_as_fqbin(E) ->
     error({gpb_error, {badmsg, E}}).
 
 
-get_proto_by_service_name_as_fqbin(<<"emqx_auth.Service">>) -> "auth";
+get_proto_by_service_name_as_fqbin(<<"emqx_auth.Authentication">>) -> "auth";
 get_proto_by_service_name_as_fqbin(E) ->
     error({gpb_error, {badservice, E}}).
 

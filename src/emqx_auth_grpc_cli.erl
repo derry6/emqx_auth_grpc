@@ -1,140 +1,145 @@
-%%--------------------------------------------------------------------
-%% Copyright (c) 2020 EMQ Technologies Co., Ltd. All Rights Reserved.
-%%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
-%%
-%%     http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
-%%--------------------------------------------------------------------
-
 -module(emqx_auth_grpc_cli).
-
--include_lib("grpcbox/include/grpcbox.hrl").
 
 -include("emqx_auth_grpc.hrl").
 
--export([init/0
-  , request/6
-  , feedvar/2
-  , feedvar/3
-]).
+-include_lib("grpcbox/include/grpcbox.hrl").
+-include_lib("emqx/include/logger.hrl").
 
-%%  auth.grpc.host =
-%%  auth.grpc.port =
-%%  auth.grpc.ssl_enabled = off
-%%  auth.grpc.ssl_cacertfile = ""
-%%  auth.grpc.ssl_certfile = ""
-%%  auth.grpc.ssl_keyfile = ""
-%%  auth.grpc.ssl_verify_peer = off
+-logger_header("[GRPC]").
 
-get_ssl_verify() ->
-  case application:get_env(?APP, ssl_verify_peer) of
-    on -> verify_peer;
-    _ -> verify_none
-  end.
+-export([init/0, auth_user/3, auth_acl/3]).
 
+with_transport([]) -> http;
+with_transport(_) -> https.
 
-get_ssl_options() ->
-  case application:get_env(?APP, ssl_enabled, off) of
-    on ->
-      [
-        {cacertfile, application:get_env(?APP, ssl_cacertfile, "")},
-        {certfile, application:get_env(?APP, ssl_certfile, "")},
-        {keyfile, application:get_env(?APP, ssl_keyfile, "")},
-        {verify, get_ssl_verify()}
-      ];
-    _ -> []
-  end.
+get_channel(undefined, _, _, _) -> {error, "no host"};
+get_channel(Host, PortKey, SslOptsKey, ChannelName) ->
+    SslOpts = application:get_env(?APP, SslOptsKey, []),
+    Port = application:get_env(?APP, PortKey, 9090),
+    {ok, {ChannelName, [{with_transport(SslOpts), Host, Port, SslOpts}], #{}}}.
 
-get_transport() ->
-  case application:get_env(?APP, ssl_enabled, off) of
-    on -> https;
-    _ -> http
-  end.
+get_channels() ->
+    Channels = [],
+    Host = application:get_env(?APP, host, undefined),
+    C2 = case get_channel(Host, port, ssl_opts, default_channel) of
+             {error, _} -> Channels;
+             {ok, Ch1} -> [Ch1 | Channels]
+         end,
+    SuperHost = application:get_env(?APP, superuser_host, undefined),
+    C3 = case get_channel(SuperHost, superuser_port, superuser_ssl_opts, super_channel) of
+             {error, _} -> C2;
+             {ok, Ch2} -> [Ch2 | C2]
+         end,
+    AclHost = application:get_env(?APP, acl_host, undefined),
+    C4 = case get_channel(AclHost, acl_port, acl_ssl_opts, acl_channel) of
+             {error, _} -> C3;
+             {ok, Ch3} -> [Ch3 | C3]
+         end,
+    lists:reverse(C4).
 
 init() ->
-  Server = application:get_env(?APP, host, "127.0.0.1"),
-  Port = application:get_env(?APP, port, 9090),
-  application:set_env(grpcbox, client,
-    #{channels => [
-      {default_channel,
-        [{get_transport(), Server, Port, get_ssl_options()}],
-        #{}
-      }
-    ]}),
-  application:ensure_all_started(grpcbox),
-  ok.
+    application:stop(grpcbox),
+    application:load(grpcbox),
+    Channels = get_channels(),
+    [fun (X) ->
+        ?LOG(debug, "Add channel: ~p", [X])
+     end (C)|| C <- Channels],
+    Clients = #{channels => Channels},
+    application:set_env(grpcbox, client, Clients),
+    {ok, _Started } = application:ensure_all_started(grpcbox).
 
-request(get, Url, Params, HttpHeaders, HttpOpts, RetryOpts) ->
-  Req = {Url ++ "?" ++ cow_qs:qs(bin_kw(Params)), HttpHeaders},
-  reply(request_(get, Req, [{autoredirect, true} | HttpOpts], [], RetryOpts));
 
-request(post, Url, Params, HttpHeaders, HttpOpts, RetryOpts) ->
-  Req = {Url, HttpHeaders, "application/x-www-form-urlencoded", cow_qs:qs(bin_kw(Params))},
-  reply(request_(post, Req, [{autoredirect, true} | HttpOpts], [], RetryOpts)).
+get_ctx(undefined) -> ctx:new();
+get_ctx([]) -> ctx:new();
+get_ctx(H) ->
+    H2 = lists:map(fun ({K, V}) -> {list_to_binary(K), list_to_binary(V)} end, H),
+    Meta = maps:from_list(H2),
+    grpcbox_metadata:append_to_outgoing_ctx(ctx:new(), Meta).
 
-request_(Method, Req, HTTPOpts, Opts, RetryOpts = #{times := Times,interval := Interval,backoff := BackOff}) ->
+get_retry_opts(ReqOpts) ->
+    Times = maps:get(retry_times, ReqOpts, 1),
+    Interval = maps:get(retry_interval, ReqOpts, 200),
+    BackOff = maps:get(retry_backoff, ReqOpts, 1),
+    {Times, Interval, BackOff}.
 
-  case httpc:request(Method, Req, HTTPOpts, Opts) of
-    {error, _Reason} when Times > 0 ->
-      timer:sleep(trunc(Interval)),
-      RetryOpts1 = RetryOpts#{times := Times - 1, interval := Interval * BackOff},
-      request_(Method, Req, HTTPOpts, Opts, RetryOpts1);
-    Other -> Other
-  end.
+auth_user(ClientInfo, Headers, ReqOpts) ->
+    Ctx = get_ctx(Headers),
+    AuthReq = build_auth_req(ClientInfo),
+    {Times, Interval, BackOff} = get_retry_opts(ReqOpts),
 
-reply({ok, {{_, Code, _}, _Headers, Body}}) -> {ok, Code, Body};
-reply({ok, Code, Body}) -> {ok, Code, Body};
-reply({error, Error}) -> {error, Error}.
+    ?LOG(debug, "Sending auth user grpc: ~p", [AuthReq]),
+    case emqx_auth_authentication_client:auth_user(Ctx, AuthReq) of
+        {error, {Code, Msg}} when Times > 0 ->
+            ?LOG(error, "Call Auth user grpc error: Code=~p, Msg=~p", [Code, Msg]),
+            timer:sleep(trunc(Interval)),
+            ROpts1 = ReqOpts#{retry_times := Times - 1, retry_interval := Interval * BackOff},
+            auth_user(ClientInfo, Headers, ROpts1);
+        {error, Error} when Times > 0 ->
+            ?LOG(error, "Call Auth user grpc error: ~p", [Error]),
+            timer:sleep(trunc(Interval)),
+            ROpts1 = ReqOpts#{retry_times := Times - 1, retry_interval := Interval * BackOff},
+            auth_user(ClientInfo, Headers, ROpts1);
+        Other -> Other
+    end.
 
-%% TODO: move this conversion to cuttlefish config and schema
-bin_kw(KeywordList) when is_list(KeywordList) ->
-  [{bin(K), bin(V)} || {K, V} <- KeywordList].
+auth_acl(ClientInfo, Headers, ReqOpts) ->
+    Ctx = get_ctx(Headers),
+    AuthReq = build_auth_req(ClientInfo),
+    {Times, Interval, BackOff} = get_retry_opts(ReqOpts),
+    ?LOG(info, "Sending check acl grpc request: ~p", [AuthReq]),
+    case emqx_auth_authentication_client:auth_acl(Ctx, AuthReq) of
+        {error, {Code, Msg}} when Times > 0 ->
+            ?LOG(error, "Call Auth ACL error: Code=~p, Msg=~p", [Code, Msg]),
+            timer:sleep(trunc(Interval)),
+            ROpts1 = ReqOpts#{retry_times := Times - 1, retry_interval := Interval * BackOff},
+            auth_acl(ClientInfo, Headers, ROpts1);
+        {error, Error} when Times > 0 ->
+            ?LOG(error, "Call Auth ACL error: ~p", [Error]),
+            timer:sleep(trunc(Interval)),
+            ROpts1 = ReqOpts#{retry_times := Times - 1, retry_interval := Interval * BackOff},
+            auth_acl(ClientInfo, Headers, ROpts1);
+        Other ->
+            Other
+    end.
 
-bin(Atom) when is_atom(Atom) ->
-  list_to_binary(atom_to_list(Atom));
-bin(Int) when is_integer(Int) ->
-  integer_to_binary(Int);
-bin(Float) when is_float(Float) ->
-  float_to_binary(Float, [{decimals, 12}, compact]);
-bin(List) when is_list(List) ->
-  list_to_binary(List);
-bin(Binary) when is_binary(Binary) ->
-  Binary.
 
-%%--------------------------------------------------------------------
-%% Feed Variables
-%%--------------------------------------------------------------------
+to_iodata(undefined) -> <<"">>;
+to_iodata(V) when is_atom(V) -> atom_to_binary(V, utf8);
+to_iodata(V) when is_list(V) -> list_to_binary(V);
+to_iodata(_) -> <<"">>.
+iodata_value(M, K) -> to_iodata(maps:get(K, M, undefined)).
 
-feedvar(Params, ClientInfo = #{username := Username,
-  clientid := ClientId,
-  protocol := Protocol,
-  peerhost := Peerhost}) ->
-  lists:map(fun({Param, "%u"}) -> {Param, Username};
-    ({Param, "%c"}) -> {Param, ClientId};
-    ({Param, "%r"}) -> {Param, Protocol};
-    ({Param, "%a"}) -> {Param, inet:ntoa(Peerhost)};
-    ({Param, "%P"}) -> {Param, maps:get(password, ClientInfo, undefined)};
-    ({Param, "%p"}) -> {Param, maps:get(sockport, ClientInfo, undefined)};
-    ({Param, "%C"}) -> {Param, maps:get(cn, ClientInfo, undefined)};
-    ({Param, "%d"}) -> {Param, maps:get(dn, ClientInfo, undefined)};
-    ({Param, "%A"}) -> {Param, maps:get(access, ClientInfo, undefined)};
-    ({Param, "%t"}) -> {Param, maps:get(topic, ClientInfo, undefined)};
-    ({Param, "%m"}) -> {Param, maps:get(mountpoint, ClientInfo, undefined)};
-    ({Param, Var}) -> {Param, Var}
-            end, Params).
+to_int(V) when is_integer(V) -> V;
+to_int(V) when is_float(V) -> trunc(V);
+to_int(_) -> 0.
+int_value(M, K) -> to_int(maps:get(K, M, undefined)).
 
-feedvar(Params, Var, Val) ->
-  lists:map(fun({Param, Var0}) when Var0 == Var ->
-    {Param, Val};
-    ({Param, Var0}) ->
-      {Param, Var0}
-            end, Params).
+to_ipaddr(undefined) -> <<"">>;
+to_ipaddr(V) when is_list(V) -> list_to_binary(V);
+to_ipaddr(_) -> <<"">>.
+ipaddr_value(M, K) -> to_ipaddr(inet:ntoa(maps:get(K, M, undefined))).
 
+to_bool(V) when is_boolean(V) -> V;
+to_bool(_) -> false.
+bool_value(M, K) -> to_bool(maps:get(K, M, undefined)).
+
+build_auth_req(ClientInfo = #{clientid := ClientID, username := Username}) ->
+    Req = #{
+        client_id => ClientID,
+        username => Username,
+        password => iodata_value(ClientInfo, password),
+        protocol => iodata_value(ClientInfo, protocol),
+        peerhost => ipaddr_value(ClientInfo, peerhost),
+        sockport => int_value(ClientInfo, sockport),
+        peercert => iodata_value(ClientInfo, peercert),
+        is_bridge => bool_value(ClientInfo, is_bridge),
+        is_superuser => bool_value(ClientInfo, is_superuser),
+        mountpoint => iodata_value(ClientInfo, mountpoint),
+        zone => iodata_value(ClientInfo, zone),
+        tls_common_name => iodata_value(ClientInfo, cn),
+        tls_subject => iodata_value(ClientInfo, dn),
+%%      acl specified
+        access => iodata_value(ClientInfo, access),
+        topic => iodata_value(ClientInfo, topic)
+    },
+    Req.

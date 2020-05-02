@@ -3,7 +3,7 @@
   {vsn, "git"},
   {modules, []},
   {registered, [emqx_auth_grpc_sup]},
-  {applications, [kernel,stdlib,grpcbox]},
+  {applications, [kernel,stdlib,grpcbox,ctx,chatterbox]},
   {mod, {emqx_auth_grpc_app, []}},
   {env, []},
   {licenses, ["Apache-2.0"]},

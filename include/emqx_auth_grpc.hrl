@@ -1,8 +1,6 @@
 
 -define(APP, emqx_auth_grpc).
 
--record(http_request, {method = post, url, params}).
-
 -record(auth_metrics, {
         success = 'client.auth.success',
         failure = 'client.auth.failure',

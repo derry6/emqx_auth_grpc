@@ -21,70 +21,47 @@
 
 -emqx_plugin(auth).
 
+-include_lib("emqx/include/logger.hrl").
 -include("emqx_auth_grpc.hrl").
 
--export([ start/2
-        , stop/1
-        ]).
+-logger_header("[AUTH_GRPC_APP]").
+
+-export([start/2, stop/1]).
 -export([init/1]).
 
 %%--------------------------------------------------------------------
 %% Application Callbacks
 %%--------------------------------------------------------------------
-
-%% host
-%% auth.host
-%% acl.host
-%% superuser.host
-
 start(_StartType, _StartArgs) ->
-    with_env(host, fun load_auth_hook/1),
-    with_env(acl_host,  fun load_acl_hook/1),
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    {ok, Sup} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+    load_hooks(),
+    {ok, Sup}.
 
-load_auth_hook(Host) ->
-    ok = emqx_acl_grpc:register_metrics(),
-    SuperHost = application:get_env(?APP, superuser_host, undefined),
-
-    SuperReq = r(application:get_env(?APP, super_req, undefined)),
-    HttpOpts = application:get_env(?APP, http_opts, []),
-    RetryOpts = application:get_env(?APP, retry_opts, []),
+load_hooks() ->
+    emqx_auth_grpc_cli:init(),
+    ReqOpts = application:get_env(?APP, req_opts, []),
     Headers = application:get_env(?APP, headers, []),
-    Params = #{auth_req   => AuthReq,
-               super_req  => SuperReq,
-               http_opts  => HttpOpts,
-               retry_opts => maps:from_list(RetryOpts),
-               headers    => Headers},
-    emqx:hook('client.authenticate', fun emqx_auth_http:check/3, [Params]).
+    Params = #{req_opts => maps:from_list(ReqOpts), headers => Headers},
 
-load_acl_hook(Host) ->
-    ok = emqx_acl_grpc:register_metrics(),
-    HttpOpts = application:get_env(?APP, http_opts, []),
-    RetryOpts = application:get_env(?APP, retry_opts, []),
-    Headers = application:get_env(?APP, headers, []),
-    Params = #{acl_req    => AclReq,
-               http_opts  => HttpOpts,
-               retry_opts => maps:from_list(RetryOpts),
-               headers    => Headers},
-    emqx:hook('client.check_acl', fun emqx_acl_http:check_acl/5, [Params]).
+    ok = emqx_auth_grpc:register_metrics(),
+    emqx:hook('client.authenticate', fun emqx_auth_grpc:check/3, [Params]),
+    ?LOG(debug, "Add client authenticate hook: ~p", [Params]),
+    case application:get_env(?APP, acl_host, undefined) of
+        undefined -> ok;
+        _ ->
+            ok = emqx_acl_grpc:register_metrics(),
+            ?LOG(debug, "Add client acl hook: ~p", [Params]),
+            emqx:hook('client.check_acl', fun emqx_acl_grpc:check/5, [Params])
+    end.
+
 
 stop(_State) ->
-    emqx:unhook('client.authenticate', fun emqx_auth_http:check/3),
-    emqx:unhook('client.check_acl', fun emqx_acl_http:check_acl/5).
+    emqx:unhook('client.authenticate', fun emqx_auth_grpc:check/3),
+    emqx:unhook('client.check_acl', fun emqx_acl_grpc:check/5).
 
 %%--------------------------------------------------------------------
 %% Dummy supervisor
 %%--------------------------------------------------------------------
 
 init([]) ->
-    {ok, { {one_for_all, 10, 100}, []} }.
-
-%%--------------------------------------------------------------------
-%% Internel functions
-%%--------------------------------------------------------------------
-
-with_env(Par, Fun) ->
-    case application:get_env(?APP, Par) of
-        undefined -> ok;
-        {ok, Host} -> Fun(Host)
-    end.
+    {ok, {{one_for_all, 10, 100}, []}}.
